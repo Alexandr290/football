@@ -1,0 +1,28 @@
+name: AdvancedSoccer
+version: '${project.version}'
+main: com.ballgame.soccer.SoccerPlugin
+api-version: '1.20'
+author: BallGame
+description: A comprehensive, physics-driven soccer (football) minigame plugin.
+website: https://github.com/ballgame/AdvancedSoccer
+softdepend: [PlaceholderAPI]
+
+commands:
+  soccer:
+    description: Main command for the AdvancedSoccer plugin.
+    usage: /soccer help
+    aliases: [sc, football, ball]
+
+permissions:
+  soccer.*:
+    description: Grants access to everything.
+    default: op
+    children:
+      soccer.play: true
+      soccer.admin: true
+  soccer.play:
+    description: Allows joining and playing matches.
+    default: true
+  soccer.admin:
+    description: Allows creating/editing arenas and controlling matches.
+    default: op

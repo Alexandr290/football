@@ -1,0 +1,17 @@
+# Build
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Raw source audio (OGG bundles are committed)
+src/main/resources/crowd-sounds/raw/
+
+# Nested crowd-pack repo metadata (pack also lives at github.com/Alexandr290/footballpack)
+crowd-pack/.git/

@@ -1,0 +1,56 @@
+{
+  "crowd.ambience_low": {
+    "sounds": [
+      { "name": "ballgame:crowd/ambience_low", "stream": true }
+    ],
+    "subtitle": "Stadium murmur"
+  },
+  "crowd.ambience_medium": {
+    "sounds": [
+      { "name": "ballgame:crowd/ambience_medium", "stream": true }
+    ],
+    "subtitle": "Stadium crowd"
+  },
+  "crowd.ambience_high": {
+    "sounds": [
+      { "name": "ballgame:crowd/ambience_high", "stream": true }
+    ],
+    "subtitle": "Roaring crowd"
+  },
+  "crowd.chant": {
+    "sounds": [
+      { "name": "ballgame:crowd/chant", "stream": true }
+    ],
+    "subtitle": "Crowd chant"
+  },
+  "crowd.goal_cheer": {
+    "sounds": [
+      "ballgame:crowd/goal_cheer"
+    ],
+    "subtitle": "Goal celebration"
+  },
+  "crowd.applause": {
+    "sounds": [
+      "ballgame:crowd/applause"
+    ],
+    "subtitle": "Crowd applause"
+  },
+  "crowd.gasp": {
+    "sounds": [
+      "ballgame:crowd/gasp"
+    ],
+    "subtitle": "Crowd gasp"
+  },
+  "crowd.stinger": {
+    "sounds": [
+      "ballgame:crowd/stinger"
+    ],
+    "subtitle": "Crowd reaction"
+  },
+  "crowd.kickoff": {
+    "sounds": [
+      "ballgame:crowd/kickoff"
+    ],
+    "subtitle": "Kickoff cheer"
+  }
+}

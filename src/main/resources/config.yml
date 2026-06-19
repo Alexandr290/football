@@ -1,0 +1,218 @@
+# =====================================================================
+#  AdvancedSoccer - Main Configuration
+# =====================================================================
+# Almost every gameplay value lives here so you can tune the feel of
+# the game without touching code. Colors use '&' codes (and hex &#RRGGBB).
+# =====================================================================
+
+config-version: 10
+
+settings:
+  # Chat prefix (overrides the language file prefix when set).
+  prefix: "&8[&aSoccer&8] &r"
+  # Language file to load from plugins/AdvancedSoccer/lang/ (en, ru).
+  language: en
+  # How often (in seconds) arenas/stats are auto-saved to disk.
+  auto-save-interval: 300
+  # Use the action bar for HUD (power/stamina). If false, uses XP bar only.
+  action-bar-hud: true
+
+# ---------------------------------------------------------------------
+# Match / game flow
+# ---------------------------------------------------------------------
+game:
+  # Players required per team before a match can auto-start.
+  min-players-per-team: 1
+  max-players-per-team: 5
+  # Seconds of the lobby countdown once enough players have joined.
+  lobby-countdown: 15
+  # Seconds of the kickoff countdown (3..2..1..GO) before the ball unlocks.
+  kickoff-countdown: 3
+  # Total match duration in seconds (split across halves).
+  match-duration: 300
+  # Number of halves. Duration is divided evenly between them.
+  halves: 2
+  # Seconds of break at half time.
+  halftime-break: 10
+  # If true, a tied match goes to golden-goal extra time.
+  golden-goal: true
+  golden-goal-duration: 120
+  # If a golden goal match is still tied, decide by penalty shootout.
+  penalty-shootout: true
+  # Allow players to rejoin a match in progress.
+  allow-rejoin: true
+  # End the match immediately if one team reaches this lead (mercy rule). 0 = off.
+  mercy-rule-lead: 0
+  # When true, the ball crossing a touchline (sideline) triggers a throw-in restart.
+  # When false, the ball is reset to center instead.
+  throw-in-enabled: true
+
+# ---------------------------------------------------------------------
+# Goal replay — TV-style cinematic playback after every goal.
+# ---------------------------------------------------------------------
+replay:
+  enabled: true
+  # How many seconds of live play to keep in the rolling buffer.
+  buffer-seconds: 15
+  # Length of the replay clip shown after a goal (seconds).
+  clip-seconds: 10
+  # Frames advanced per server tick (lower = slower motion). 0.55 ≈ half speed.
+  playback-speed: 0.55
+  # Ticks to hold on the goal frame before the replay begins (20 ticks = 1 sec).
+  goal-hold-ticks: 25
+  # Particle trail following the ball during replay.
+  ball-trail: true
+  # Highlight the scorer with glow near the end of the clip.
+  scorer-glow: true
+  # Progress bar at the top of the screen during replay.
+  boss-bar: true
+  # Camera style: cinematic (multi-angle), chase, broadcast
+  camera-style: cinematic
+  # Pitch actors: auto (mannequin on 1.21.4+, else armor stand), mannequin, armor_stand
+  actor-type: auto
+
+# ---------------------------------------------------------------------
+# Crowd atmosphere — real stadium recordings.
+# Default mode is MANUAL: no download server. Install the pack once locally:
+#   plugins/AdvancedSoccer/AdvancedSoccer-Crowd.zip
+#   → copy to .minecraft/resourcepacks/ → Options > Resource Packs > enable
+# ---------------------------------------------------------------------
+crowd:
+  enabled: true
+  volume: 0.85
+  real-sounds: true
+  ambience-interval-ticks: 14
+  danger-radius: 18.0
+  danger-min-speed: 0.75
+  goal-celebration: true
+  react-to-saves: true
+  react-to-shots: true
+  resource-pack:
+    # manual = local install, no network | download = plugin HTTP server | url = external HTTPS
+    mode: manual
+    auto-serve: false
+    port: 8123
+    public-host: ""
+    url: ""
+    use-hash: true
+
+# ---------------------------------------------------------------------
+# Championships — leagues & knockout cups with GUI registration.
+# ---------------------------------------------------------------------
+championships:
+  enabled: true
+  min-teams-to-start: 2
+  max-teams: 16
+  points-win: 3
+  points-draw: 1
+  points-loss: 0
+
+# ---------------------------------------------------------------------
+# Ball physics - the heart of the plugin.
+# Values are per-tick unless stated otherwise (20 ticks = 1 second).
+# ---------------------------------------------------------------------
+ball:
+  # Visual: the head texture / item used to render the ball.
+  # Options: SNOWBALL (item), HEAD (custom soccer-ball player head), FIREWORK_STAR
+  display: HEAD
+  # Custom Base64 texture for the soccer ball head (classic black/white ball).
+  head-texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYmM4ZWE3MWE1ZjJiZjMzNmY4ODFkMTcyMGI1ODdiNmU1OWM5MWRjN2RkNGY0ODBmMzZkMzMyZGE0YzkzM2EifX19"
+  # World gravity applied to the ball each tick (blocks/tick^2). Higher = the
+  # ball falls faster and arcs are tighter.
+  gravity: 0.048
+  # Light linear air retention each airborne tick (1.0 = none). Keep close to 1;
+  # most slowdown should come from the quadratic drag below.
+  air-resistance: 0.992
+  # Quadratic air drag coefficient. Drag scales with speed (~v^2), so powerful
+  # shots lose pace quickly while gentle balls glide. Raise for a "heavier" ball.
+  drag-coefficient: 0.006
+  # Rolling resistance multiplier applied to horizontal speed while on the
+  # ground (per tick). Higher (closer to 1) = the ball rolls further.
+  ground-friction: 0.93
+  # Fraction of rolling speed converted into visible spin (cosmetic feel).
+  rolling-spin-transfer: 0.12
+  # Bounciness: vertical speed retained after a bounce (0 = dead, 1 = perfect).
+  # Real footballs on grass are around 0.6.
+  restitution: 0.62
+  # Horizontal speed retained each time the ball bounces (turf scrub).
+  bounce-friction: 0.78
+  # Vertical speed (blocks/tick) below which the ball stops bouncing and settles
+  # into a roll. Prevents endless tiny bounces / jitter.
+  bounce-threshold: 0.12
+  # Below this horizontal speed (blocks/tick) a rolling ball is considered at rest.
+  rest-threshold: 0.035
+  # Magnus effect strength - converts spin into a sideways/lifting curving force.
+  magnus-strength: 0.022
+  # How much spin is retained each tick (closer to 1 = curve lasts longer).
+  spin-decay: 0.97
+  # Maximum speed (blocks/tick) the ball is allowed to travel (safety clamp).
+  max-speed: 4.5
+  # Radius (blocks) used for ball<->player collision detection.
+  collision-radius: 0.65
+  # Relative ball mass (reserved for tuning kick impulse transfer).
+  mass: 1.0
+  # The ball will be teleported back to center if it leaves the arena bounds.
+  reset-when-out: true
+
+# ---------------------------------------------------------------------
+# Player kicking / shooting mechanics.
+# ---------------------------------------------------------------------
+mechanics:
+  # Max horizontal reach (blocks) to touch the ball.
+  kick-reach: 3.0
+  # Base kick power applied on a light touch (left-click / walking into ball).
+  light-touch-power: 0.45
+  # Maximum charged-shot power (sneak + hold to charge, then release).
+  max-shot-power: 2.8
+  # Seconds to fully charge a shot from min to max.
+  charge-time: 1.2
+  # Upward lift added to shots so the ball arcs realistically.
+  shot-lift: 0.32
+  # Multiplier applied to a pass (right-click) vs a shot (left-click).
+  pass-power-multiplier: 0.6
+  # Extra power granted while sprinting (adds player momentum to the ball).
+  sprint-bonus: 0.35
+  # Spin imparted based on where the player looks vs moves (curve shots).
+  curve-strength: 0.9
+  # Sliding tackle: sneak + sprint to slide and steal the ball.
+  tackle-enabled: true
+  tackle-power: 1.1
+  tackle-cooldown: 4.0
+  # Stamina system. Sprinting/charging consumes stamina.
+  stamina-enabled: true
+  max-stamina: 100.0
+  stamina-regen: 1.2
+  sprint-drain: 0.6
+  charge-drain: 0.8
+  tackle-drain: 18.0
+  # Goalkeeper: players inside their own goal box get a catch radius bonus.
+  keeper-catch-bonus: 1.5
+
+# ---------------------------------------------------------------------
+# Scoreboard — optional overrides (defaults from lang/<language>.yml).
+# Leave title/lines empty or remove them to use the language file.
+# ---------------------------------------------------------------------
+scoreboard:
+  enabled: true
+  # title: "&a&lADVANCED SOCCER"
+  # lines: []
+
+# ---------------------------------------------------------------------
+# Teams
+# ---------------------------------------------------------------------
+teams:
+  red:
+    name: "Red"
+    color: "RED"
+    chat-color: "&c"
+  blue:
+    name: "Blue"
+    color: "BLUE"
+    chat-color: "&9"
+
+# ---------------------------------------------------------------------
+# Messages — optional overrides. Defaults come from lang/<language>.yml
+# (lang/en.yml, lang/ru.yml). Copy those files to plugins/AdvancedSoccer/lang/
+# to customize. Set settings.language to "ru" for Russian.
+# ---------------------------------------------------------------------
+messages: {}

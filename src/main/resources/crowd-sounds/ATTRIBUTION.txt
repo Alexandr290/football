@@ -1,0 +1,12 @@
+Stadium crowd recordings bundled with AdvancedSoccer are royalty-free samples from Mixkit
+(https://mixkit.co/free-sound-effects/crowd/) used under the Mixkit License.
+
+Source IDs (mixkit.co/free-sound-effects/download/<id>):
+  2111 — Crowd at the stadium (ambience_low)
+  362  — Stadium crowd light applause (ambience_medium, kickoff)
+  438  — Crowd chanting at stadium (chant)
+  363  — Stadium chaotic loud applause (ambience_high)
+  3022 — Stadium joy shouting crowd (goal_cheer)
+  442  — Crowd clapping (applause)
+  974  — Crowd reaction (gasp)
+  2568 — Short crowd stinger (stinger)
