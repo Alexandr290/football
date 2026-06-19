@@ -15,6 +15,13 @@ import org.bukkit.configuration.ConfigurationSection;
  */
 public final class Arena {
 
+    /** FIFA goal mouth height (blocks). Used when admins mark only the goal line on the ground. */
+    private static final double STANDARD_GOAL_HEIGHT = 2.44;
+    /** Ball center tolerance below/above the goal frame ({@link com.ballgame.soccer.ball.Ball} radius). */
+    private static final double GOAL_BALL_PADDING = 0.35;
+    /** Flat goal regions (pos1/pos2 at ground) use this minimum vertical span before trusting maxY. */
+    private static final double GOAL_MIN_MARKED_HEIGHT = 1.0;
+
     private final String name;
 
     private Cuboid field;          // overall play boundary
@@ -53,9 +60,9 @@ public final class Arena {
     /**
      * Returns which goal the ball is in, or null if neither.
      *
-     * <p>Uses a generous vertical range and horizontal footprint so goals still
-     * register when the ball is airborne or the admin region was marked at
-     * ground height only.</p>
+     * <p>The ball centre must be inside the goal width/depth and below the
+     * crossbar (with a small padding for the ball radius). Shots over the bar
+     * do not count.</p>
      */
     public TeamSide goalContaining(Location loc) {
         if (loc == null) {
@@ -209,7 +216,14 @@ public final class Arena {
     }
 
     private boolean isWithinGoalHeight(Cuboid goal, double y) {
-        return y >= goal.getMinY() - 0.5 && y <= goal.getMaxY() + 4.5;
+        double floorY = goal.getMinY() - GOAL_BALL_PADDING;
+        double ceilingY;
+        if (goal.getSizeY() < GOAL_MIN_MARKED_HEIGHT) {
+            ceilingY = goal.getMinY() + STANDARD_GOAL_HEIGHT + GOAL_BALL_PADDING;
+        } else {
+            ceilingY = goal.getMaxY() + GOAL_BALL_PADDING;
+        }
+        return y >= floorY && y <= ceilingY;
     }
 
     private boolean isGoalOnLowZEnd(Cuboid goal) {

@@ -33,6 +33,7 @@ public final class SoccerSettings {
     public boolean allowRejoin;
     public int mercyRuleLead;
     public boolean throwInEnabled;
+    public boolean broadcastHud;
 
     // ball
     public String ballDisplay;
@@ -105,6 +106,16 @@ public final class SoccerSettings {
     public int champPointsWin;
     public int champPointsDraw;
     public int champPointsLoss;
+    public boolean champPlayoffsEnabled;
+    public int champPlayoffQualifiers;
+    public int champPlayoffMinTeams;
+    public int champGroupCount;
+    public int champTeamsPerGroup;
+    public int champAdvancePerGroup;
+
+    public int worldCupTeamSlots() {
+        return champGroupCount * champTeamsPerGroup;
+    }
 
     // crowd atmosphere
     public boolean crowdEnabled;
@@ -122,6 +133,7 @@ public final class SoccerSettings {
     public String crowdPackPublicHost;
     public String crowdPackUrl;
     public boolean crowdPackUseHash;
+    public boolean crowdPackPromptOnJoin;
 
     public SoccerSettings(SoccerPlugin plugin) {
         this.plugin = plugin;
@@ -139,13 +151,14 @@ public final class SoccerSettings {
         kickoffCountdown = c.getInt("game.kickoff-countdown", 3);
         matchDuration = c.getInt("game.match-duration", 300);
         halves = Math.max(1, c.getInt("game.halves", 2));
-        halftimeBreak = c.getInt("game.halftime-break", 10);
+        halftimeBreak = c.getInt("game.halftime-break", 30);
         goldenGoal = c.getBoolean("game.golden-goal", true);
         goldenGoalDuration = c.getInt("game.golden-goal-duration", 120);
         penaltyShootout = c.getBoolean("game.penalty-shootout", true);
         allowRejoin = c.getBoolean("game.allow-rejoin", true);
         mercyRuleLead = c.getInt("game.mercy-rule-lead", 0);
         throwInEnabled = c.getBoolean("game.throw-in-enabled", true);
+        broadcastHud = c.getBoolean("game.broadcast-hud", true);
 
         replayEnabled = c.getBoolean("replay.enabled", true);
         replayBufferSeconds = c.getInt("replay.buffer-seconds", 15);
@@ -166,13 +179,14 @@ public final class SoccerSettings {
         crowdGoalCelebration = c.getBoolean("crowd.goal-celebration", true);
         crowdReactSaves = c.getBoolean("crowd.react-to-saves", true);
         crowdReactShots = c.getBoolean("crowd.react-to-shots", true);
-        crowdRealSounds = c.getBoolean("crowd.real-sounds", true);
+        crowdRealSounds = c.getBoolean("crowd.real-sounds", false);
         crowdPackMode = CrowdPackMode.parse(c.getString("crowd.resource-pack.mode", "manual"));
         crowdPackAutoServe = c.getBoolean("crowd.resource-pack.auto-serve", false);
         crowdPackPort = c.getInt("crowd.resource-pack.port", 8123);
         crowdPackPublicHost = c.getString("crowd.resource-pack.public-host", "");
         crowdPackUrl = c.getString("crowd.resource-pack.url", "");
         crowdPackUseHash = c.getBoolean("crowd.resource-pack.use-hash", true);
+        crowdPackPromptOnJoin = c.getBoolean("crowd.resource-pack.prompt-on-join", false);
 
         championshipsEnabled = c.getBoolean("championships.enabled", true);
         champMinTeamsToStart = c.getInt("championships.min-teams-to-start", 2);
@@ -180,6 +194,12 @@ public final class SoccerSettings {
         champPointsWin = c.getInt("championships.points-win", 3);
         champPointsDraw = c.getInt("championships.points-draw", 1);
         champPointsLoss = c.getInt("championships.points-loss", 0);
+        champPlayoffsEnabled = c.getBoolean("championships.playoffs-enabled", true);
+        champPlayoffQualifiers = c.getInt("championships.playoff-qualifiers", 8);
+        champPlayoffMinTeams = c.getInt("championships.playoff-min-teams", 4);
+        champGroupCount = c.getInt("championships.group-count", 8);
+        champTeamsPerGroup = c.getInt("championships.teams-per-group", 2);
+        champAdvancePerGroup = c.getInt("championships.advance-per-group", 1);
 
         ballDisplay = c.getString("ball.display", "HEAD").toUpperCase();
         ballHeadTexture = c.getString("ball.head-texture", "");

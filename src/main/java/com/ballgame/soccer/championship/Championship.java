@@ -19,6 +19,7 @@ public final class Championship {
     private int pointsLoss;
     private long createdAt;
     private String championTeamId;
+    private boolean playoffsActive;
 
     private final Map<String, ChampTeam> teams = new HashMap<>();
     private final Map<String, ChampStanding> standings = new HashMap<>();
@@ -97,6 +98,99 @@ public final class Championship {
         this.championTeamId = championTeamId;
     }
 
+    public boolean isPlayoffsActive() {
+        return playoffsActive;
+    }
+
+    public void setPlayoffsActive(boolean playoffsActive) {
+        this.playoffsActive = playoffsActive;
+    }
+
+    public boolean hasPlayoffFixtures() {
+        for (ChampFixture fixture : fixtures) {
+            if (fixture.getPlayoffStage() != null) {
+                return true;
+            }
+        }
+        return playoffsActive;
+    }
+
+    public List<ChampFixture> getPlayoffFixtures() {
+        List<ChampFixture> list = new ArrayList<>();
+        for (ChampFixture fixture : fixtures) {
+            if (fixture.getPlayoffStage() != null) {
+                list.add(fixture);
+            }
+        }
+        return list;
+    }
+
+    public List<ChampFixture> getLeagueFixtures() {
+        List<ChampFixture> list = new ArrayList<>();
+        for (ChampFixture fixture : fixtures) {
+            if (fixture.getPlayoffStage() == null) {
+                list.add(fixture);
+            }
+        }
+        return list;
+    }
+
+    public List<ChampFixture> getGroupFixtures() {
+        List<ChampFixture> list = new ArrayList<>();
+        for (ChampFixture fixture : fixtures) {
+            if (fixture.getPlayoffStage() == PlayoffStage.GROUP) {
+                list.add(fixture);
+            }
+        }
+        return list;
+    }
+
+    public List<ChampFixture> getKnockoutFixtures() {
+        List<ChampFixture> list = new ArrayList<>();
+        for (ChampFixture fixture : fixtures) {
+            if (fixture.getPlayoffStage() != null && fixture.getPlayoffStage().isKnockout()) {
+                list.add(fixture);
+            }
+        }
+        return list;
+    }
+
+    public boolean hasGroupStage() {
+        return getFixtures().stream().anyMatch(f -> f.getPlayoffStage() == PlayoffStage.GROUP);
+    }
+
+    public boolean isGroupPhaseComplete() {
+        for (ChampFixture fixture : fixtures) {
+            if (fixture.getPlayoffStage() == PlayoffStage.GROUP
+                    && fixture.hasBothSides()
+                    && fixture.getState() != FixtureState.COMPLETED) {
+                return false;
+            }
+        }
+        return hasGroupStage();
+    }
+
+    public List<String> getGroupIds() {
+        List<String> groups = new ArrayList<>();
+        for (ChampTeam team : teams.values()) {
+            if (team.getGroupId() != null && !groups.contains(team.getGroupId())) {
+                groups.add(team.getGroupId());
+            }
+        }
+        groups.sort(String::compareTo);
+        return groups;
+    }
+
+    public List<ChampTeam> getTeamsInGroup(String groupId) {
+        List<ChampTeam> list = new ArrayList<>();
+        for (ChampTeam team : teams.values()) {
+            if (groupId != null && groupId.equals(team.getGroupId())) {
+                list.add(team);
+            }
+        }
+        return list;
+    }
+
     public Map<String, ChampTeam> getTeams() {
         return Collections.unmodifiableMap(teams);
     }
@@ -107,7 +201,7 @@ public final class Championship {
 
     public void addTeam(ChampTeam team) {
         teams.put(team.getId(), team);
-        if (type == ChampionshipType.LEAGUE) {
+        if (type == ChampionshipType.LEAGUE || type == ChampionshipType.KNOCKOUT) {
             standings.putIfAbsent(team.getId(), new ChampStanding(team.getId()));
         }
     }
@@ -144,6 +238,10 @@ public final class Championship {
 
     public void clearFixtures() {
         fixtures.clear();
+    }
+
+    public void removeBracketFixtures() {
+        fixtures.removeIf(fixture -> fixture.getPlayoffStage() != null || fixture.getRound() > 0);
     }
 
     public void putStanding(ChampStanding standing) {

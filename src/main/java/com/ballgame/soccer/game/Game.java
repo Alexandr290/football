@@ -15,6 +15,7 @@ import com.ballgame.soccer.replay.GoalReplay;
 import com.ballgame.soccer.replay.ReplayAnimationTracker;
 import com.ballgame.soccer.replay.ReplayRecorder;
 import com.ballgame.soccer.util.ActionBar;
+import com.ballgame.soccer.util.MatchBroadcastHud;
 import com.ballgame.soccer.util.Text;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
@@ -61,6 +62,7 @@ public final class Game {
 
     private Ball ball;
     private MatchScoreboard scoreboard;
+    private MatchBroadcastHud broadcastHud;
 
     private int redScore;
     private int blueScore;
@@ -93,6 +95,8 @@ public final class Game {
 
     private String championshipId;
     private String fixtureId;
+    private String matchRedName;
+    private String matchBlueName;
 
     /** Goal details held until replay finishes. */
     private TeamSide pendingCelebrationTeam;
@@ -137,14 +141,15 @@ public final class Game {
         if (scoreboard != null) {
             scoreboard.apply(player);
         }
+        if (broadcastHud != null) {
+            broadcastHud.attach(player);
+        }
         plugin.messages().send(player, "joined-queue",
                 "arena", arena.getName(), "team", teamName(team));
         broadcast(plugin.messages().format("player-joined",
                 "team_color", teamChat(team),
                 "player", player.getName(),
                 "count", String.valueOf(countTeam(team))));
-
-        plugin.crowdPack().offer(player);
 
         if (state == GameState.WAITING && hasEnoughPlayers()) {
             startCountdown();
@@ -159,6 +164,9 @@ public final class Game {
         }
         if (scoreboard != null) {
             scoreboard.clear(player);
+        }
+        if (broadcastHud != null) {
+            broadcastHud.detach(player);
         }
         resetPlayerVisuals(player);
         resetParticipantMovement(player);
@@ -271,6 +279,10 @@ public final class Game {
         replayAnimations = new ReplayAnimationTracker();
         crowd = new CrowdAudio(plugin, this);
         ball.spawn(ballSpawnLocation());
+        if (settings.broadcastHud) {
+            broadcastHud = new MatchBroadcastHud(plugin);
+            forEachPlayer(broadcastHud::attach);
+        }
         startHalf();
     }
 
@@ -445,6 +457,10 @@ public final class Game {
             return;
         }
         ended = true;
+        if (broadcastHud != null) {
+            broadcastHud.destroy();
+            broadcastHud = null;
+        }
         if (goalReplay != null) {
             goalReplay.cancel();
             goalReplay = null;
@@ -506,6 +522,10 @@ public final class Game {
      * {@link GameManager}.
      */
     public void cleanup() {
+        if (broadcastHud != null) {
+            broadcastHud.destroy();
+            broadcastHud = null;
+        }
         if (ball != null) {
             ball.remove();
         }
@@ -572,6 +592,7 @@ public final class Game {
         }
 
         updateHud();
+        updateBroadcastHud();
 
         if (++tickInSecond >= 20) {
             tickInSecond = 0;
@@ -1136,6 +1157,77 @@ public final class Game {
         forEachPlayer(p -> ActionBar.send(p, Text.color(label)));
     }
 
+    private void updateBroadcastHud() {
+        if (!settings.broadcastHud || broadcastHud == null) {
+            return;
+        }
+        if (celebrating || goalReplay != null) {
+            broadcastHud.setVisible(false);
+            return;
+        }
+        boolean halftime = state == GameState.HALFTIME;
+        boolean liveClock = state == GameState.PLAYING || state == GameState.EXTRA_TIME
+                || state == GameState.THROW_IN || halftime;
+        if (!liveClock) {
+            broadcastHud.setVisible(false);
+            return;
+        }
+
+        TeamSide possession = null;
+        if (ball != null) {
+            possession = ball.getLastTouchTeam();
+        }
+        broadcastHud.setVisible(true);
+        broadcastHud.update(
+                MatchBroadcastHud.tvLine(
+                        teamChat(TeamSide.RED), teamName(TeamSide.RED), redScore,
+                        blueScore, teamName(TeamSide.BLUE), teamChat(TeamSide.BLUE),
+                        Text.formatTime(elapsedMatchSeconds()),
+                        halftime,
+                        state == GameState.EXTRA_TIME,
+                        possession),
+                broadcastPhaseProgress(),
+                state == GameState.EXTRA_TIME);
+    }
+
+    private double broadcastPhaseProgress() {
+        int halfDuration = halfDurationSeconds();
+        switch (state) {
+            case PLAYING:
+            case THROW_IN:
+                return Math.min(1.0, (double) Math.max(0, halfDuration - secondsRemaining) / halfDuration);
+            case EXTRA_TIME:
+                return Math.min(1.0, (double) Math.max(0, settings.goldenGoalDuration - secondsRemaining)
+                        / Math.max(1, settings.goldenGoalDuration));
+            case HALFTIME:
+                return 1.0;
+            default:
+                return 0.0;
+        }
+    }
+
+    private int halfDurationSeconds() {
+        return Math.max(10, settings.matchDuration / Math.max(1, settings.halves));
+    }
+
+    /** Elapsed match time (ascending), like a TV broadcast clock. */
+    private int elapsedMatchSeconds() {
+        int halfDuration = halfDurationSeconds();
+        switch (state) {
+            case PLAYING:
+            case THROW_IN:
+                return (currentHalf - 1) * halfDuration
+                        + Math.max(0, halfDuration - secondsRemaining);
+            case EXTRA_TIME:
+                return settings.matchDuration
+                        + Math.max(0, settings.goldenGoalDuration - secondsRemaining);
+            case HALFTIME:
+                return currentHalf * halfDuration;
+            default:
+                return 0;
+        }
+    }
+
     private void updateHud() {
         for (SoccerPlayer sp : players.values()) {
             Player p = sp.getBukkitPlayer();
@@ -1177,13 +1269,15 @@ public final class Game {
         switch (state) {
             case PLAYING:
             case EXTRA_TIME:
-                return Text.formatTime(secondsRemaining)
+            case THROW_IN:
+                return Text.formatTime(elapsedMatchSeconds())
                         + (settings.halves > 1
                         ? plugin.messages().format("half-suffix", "half", String.valueOf(currentHalf))
                         : "");
+            case HALFTIME:
+                return Text.formatTime(elapsedMatchSeconds());
             case COUNTDOWN:
             case KICKOFF:
-            case HALFTIME:
                 return ":" + countdown;
             default:
                 return plugin.messages().stateDisplay(state);
@@ -1368,6 +1462,12 @@ public final class Game {
     }
 
     private String teamName(TeamSide team) {
+        if (team == TeamSide.RED && matchRedName != null && !matchRedName.isBlank()) {
+            return matchRedName;
+        }
+        if (team == TeamSide.BLUE && matchBlueName != null && !matchBlueName.isBlank()) {
+            return matchBlueName;
+        }
         return team == TeamSide.RED ? settings.redName : settings.blueName;
     }
 
@@ -1414,6 +1514,11 @@ public final class Game {
     public void setChampionship(String championshipId, String fixtureId) {
         this.championshipId = championshipId;
         this.fixtureId = fixtureId;
+    }
+
+    public void setMatchTeamNames(String redName, String blueName) {
+        this.matchRedName = redName;
+        this.matchBlueName = blueName;
     }
 
     public String getChampionshipId() {

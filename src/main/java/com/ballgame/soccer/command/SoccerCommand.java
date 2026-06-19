@@ -4,6 +4,7 @@ import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
 import com.ballgame.soccer.championship.Championship;
 import com.ballgame.soccer.championship.ChampionshipType;
+import com.ballgame.soccer.championship.ChampTeam;
 import com.ballgame.soccer.crowd.CrowdPackMode;
 import com.ballgame.soccer.game.Game;
 import com.ballgame.soccer.stats.PlayerStats;
@@ -43,7 +44,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             "create", "delete", "pos1", "pos2", "setfield", "setredgoal", "setbluegoal",
             "setballspawn", "setredspawn", "setbluespawn", "setlobby", "setspectator",
             "enable", "disable", "start", "stop", "reload", "crowdpack",
-            "cupcreate", "cupdelete", "cupstart");
+            "cupcreate", "cupdelete", "cupstart", "cuprename", "teamrename");
 
     public SoccerCommand(SoccerPlugin plugin) {
         this.plugin = plugin;
@@ -71,6 +72,8 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             case "cupcreate":   return cupCreate(sender, args);
             case "cupdelete":   return cupDelete(sender, args);
             case "cupstart":    return cupStart(sender, args);
+            case "cuprename":   return cupRename(sender, args);
+            case "teamrename":  return teamRename(sender, args);
 
             // --- admin ---
             case "create":      return adminCreate(sender, args);
@@ -538,10 +541,71 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             plugin.messages().sendRaw(sender, "&cUsage: /soccer cupstart <id>");
             return true;
         }
-        if (plugin.championships().startChampionship(args[1])) {
-            plugin.messages().send(sender, "champ-started-admin", "id", args[1]);
+        if (plugin.championships().tryStartChampionship(
+                sender instanceof Player player ? player : null, args[1])) {
+            if (!(sender instanceof Player)) {
+                plugin.messages().send(sender, "champ-started-admin", "id", args[1]);
+            }
+        } else if (sender instanceof Player) {
+            // tryStartChampionship already sent the reason
         } else {
             plugin.messages().send(sender, "champ-start-failed");
+        }
+        return true;
+    }
+
+    private boolean cupRename(CommandSender sender, String[] args) {
+        if (notAdmin(sender)) {
+            return true;
+        }
+        if (args.length < 3) {
+            plugin.messages().sendRaw(sender, "&cUsage: /soccer cuprename <id> <name>");
+            return true;
+        }
+        String name = joinArgs(args, 2);
+        if (plugin.championships().renameChampionship(args[1], name)) {
+            plugin.messages().send(sender, "champ-renamed", "name", name.trim());
+        } else {
+            plugin.messages().send(sender, "champ-rename-failed");
+        }
+        return true;
+    }
+
+    private boolean teamRename(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender, "soccer.play");
+        if (player == null) {
+            return true;
+        }
+        if (args.length < 3) {
+            plugin.messages().sendRaw(sender, "&cUsage: /soccer teamrename <cupId> [teamId] <name>");
+            return true;
+        }
+        Championship championship = plugin.championships().get(args[1]);
+        if (championship == null) {
+            plugin.messages().send(sender, "champ-not-found");
+            return true;
+        }
+
+        boolean admin = player.hasPermission("soccer.admin");
+        String teamId;
+        String newName;
+        if (admin && args.length >= 4 && championship.getTeam(args[2]) != null) {
+            teamId = args[2];
+            newName = joinArgs(args, 3);
+        } else {
+            ChampTeam team = championship.findTeamOf(player.getUniqueId());
+            if (team == null || !player.getUniqueId().equals(team.getCaptain())) {
+                plugin.messages().send(sender, "champ-team-rename-failed");
+                return true;
+            }
+            teamId = team.getId();
+            newName = joinArgs(args, 2);
+        }
+
+        if (plugin.championships().renameTeam(championship, teamId, newName, admin)) {
+            plugin.messages().send(sender, "champ-team-renamed", "name", newName.trim());
+        } else {
+            plugin.messages().send(sender, "champ-team-rename-failed");
         }
         return true;
     }
@@ -563,6 +627,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             plugin.messages().sendRaw(sender, "&c/soccer pos1|pos2|enable|disable|start|stop|reload");
             plugin.messages().sendRaw(sender, "&c/soccer cupcreate <id> <league|knockout> [name] [arena]");
             plugin.messages().sendRaw(sender, "&c/soccer cupdelete <id> | cupstart <id>");
+            plugin.messages().sendRaw(sender, "&c/soccer cuprename <id> <name> | teamrename <cupId> [teamId] <name>");
         }
     }
 
@@ -619,7 +684,12 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             if (sub.equals("cupcreate")) {
                 return filter(Arrays.asList("league", "knockout"), args[1]);
             }
-            if (sub.equals("cupdelete") || sub.equals("cupstart")) {
+            if (sub.equals("cupdelete") || sub.equals("cupstart") || sub.equals("cuprename")) {
+                List<String> ids = new ArrayList<>();
+                plugin.championships().getAll().forEach(c -> ids.add(c.getId()));
+                return filter(ids, args[1]);
+            }
+            if (sub.equals("teamrename")) {
                 List<String> ids = new ArrayList<>();
                 plugin.championships().getAll().forEach(c -> ids.add(c.getId()));
                 return filter(ids, args[1]);
@@ -657,5 +727,16 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             }
         }
         return result;
+    }
+
+    private static String joinArgs(String[] args, int from) {
+        if (from >= args.length) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder(args[from]);
+        for (int i = from + 1; i < args.length; i++) {
+            builder.append(' ').append(args[i]);
+        }
+        return builder.toString();
     }
 }

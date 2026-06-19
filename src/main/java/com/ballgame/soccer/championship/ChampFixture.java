@@ -1,13 +1,12 @@
 package com.ballgame.soccer.championship;
 
-import java.util.UUID;
-
 public final class ChampFixture {
 
     private final String id;
     private final int round;
     private String teamAId;
     private String teamBId;
+    private PlayoffStage playoffStage;
     private FixtureState state;
     private int scoreA;
     private int scoreB;
@@ -36,6 +35,18 @@ public final class ChampFixture {
 
     public String getTeamBId() {
         return teamBId;
+    }
+
+    public PlayoffStage getPlayoffStage() {
+        return playoffStage;
+    }
+
+    public void setPlayoffStage(PlayoffStage playoffStage) {
+        this.playoffStage = playoffStage;
+    }
+
+    public boolean isPlayoff() {
+        return playoffStage != null;
     }
 
     public void setTeamAId(String teamAId) {
@@ -87,7 +98,10 @@ public final class ChampFixture {
         return teamId != null && (teamId.equals(teamAId) || teamId.equals(teamBId));
     }
 
-    public boolean involvesPlayer(Championship championship, UUID playerId) {
+    public boolean involvesPlayer(Championship championship, java.util.UUID playerId) {
+        if (playerId == null) {
+            return false;
+        }
         ChampTeam a = championship.getTeam(teamAId);
         ChampTeam b = championship.getTeam(teamBId);
         return (a != null && a.contains(playerId)) || (b != null && b.contains(playerId));
@@ -95,5 +109,25 @@ public final class ChampFixture {
 
     public boolean isBye() {
         return teamAId == null || teamBId == null;
+    }
+
+    public boolean hasBothSides() {
+        return teamAId != null && teamBId != null;
+    }
+
+    public String sideADisplay(Championship championship) {
+        if (teamAId != null) {
+            ChampTeam team = championship.getTeam(teamAId);
+            return team != null ? team.getName() : teamAId;
+        }
+        return "TBD";
+    }
+
+    public String sideBDisplay(Championship championship) {
+        if (teamBId != null) {
+            ChampTeam team = championship.getTeam(teamBId);
+            return team != null ? team.getName() : teamBId;
+        }
+        return "TBD";
     }
 }

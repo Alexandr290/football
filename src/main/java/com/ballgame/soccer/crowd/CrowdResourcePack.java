@@ -91,6 +91,9 @@ public final class CrowdResourcePack {
     }
 
     public void offer(Player player) {
+        if (!plugin.settings().crowdPackPromptOnJoin) {
+            return;
+        }
         if (!isReady() || plugin.settings().crowdPackMode != CrowdPackMode.DOWNLOAD
                 && plugin.settings().crowdPackMode != CrowdPackMode.URL) {
             return;

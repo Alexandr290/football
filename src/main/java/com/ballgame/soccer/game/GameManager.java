@@ -128,6 +128,12 @@ public final class GameManager {
 
     public boolean joinChampionship(Player player, Arena arena, TeamSide side,
                                     String championshipId, String fixtureId) {
+        return joinChampionship(player, arena, side, championshipId, fixtureId, null, null);
+    }
+
+    public boolean joinChampionship(Player player, Arena arena, TeamSide side,
+                                    String championshipId, String fixtureId,
+                                    String redDisplayName, String blueDisplayName) {
         if (gamesByPlayer.containsKey(player.getUniqueId())) {
             plugin.messages().send(player, "already-in-game");
             return false;
@@ -140,6 +146,9 @@ public final class GameManager {
         if (game == null) {
             game = new Game(plugin, arena);
             game.setChampionship(championshipId, fixtureId);
+            if (redDisplayName != null && blueDisplayName != null) {
+                game.setMatchTeamNames(redDisplayName, blueDisplayName);
+            }
             gamesByArena.put(key(arena), game);
         }
         if (game.isFull()) {

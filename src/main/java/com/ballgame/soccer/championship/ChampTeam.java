@@ -12,6 +12,7 @@ public final class ChampTeam {
     private UUID captain;
     private final List<UUID> members = new ArrayList<>();
     private boolean eliminated;
+    private String groupId;
 
     public ChampTeam(String id, String name, UUID captain) {
         this.id = id;
@@ -68,5 +69,13 @@ public final class ChampTeam {
 
     public void setEliminated(boolean eliminated) {
         this.eliminated = eliminated;
+    }
+
+    public String getGroupId() {
+        return groupId;
+    }
+
+    public void setGroupId(String groupId) {
+        this.groupId = groupId;
     }
 }

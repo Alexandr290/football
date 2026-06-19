@@ -33,7 +33,7 @@ game:
   # Number of halves. Duration is divided evenly between them.
   halves: 2
   # Seconds of break at half time.
-  halftime-break: 10
+  halftime-break: 30
   # If true, a tied match goes to golden-goal extra time.
   golden-goal: true
   golden-goal-duration: 120
@@ -46,6 +46,8 @@ game:
   # When true, the ball crossing a touchline (sideline) triggers a throw-in restart.
   # When false, the ball is reset to center instead.
   throw-in-enabled: true
+  # TV-style score + ascending match clock at the top of the screen during play.
+  broadcast-hud: true
 
 # ---------------------------------------------------------------------
 # Goal replay — TV-style cinematic playback after every goal.
@@ -80,7 +82,8 @@ replay:
 crowd:
   enabled: true
   volume: 0.85
-  real-sounds: true
+  # false = vanilla NPC shouts from the stands (no resource pack needed).
+  real-sounds: false
   ambience-interval-ticks: 14
   danger-radius: 18.0
   danger-min-speed: 0.75
@@ -88,9 +91,10 @@ crowd:
   react-to-saves: true
   react-to-shots: true
   resource-pack:
-    # manual = local install, no network | download = plugin HTTP server | url = external HTTPS
+    # manual = local install only, no server download | download | url
     mode: manual
     auto-serve: false
+    prompt-on-join: false
     port: 8123
     public-host: ""
     url: ""
@@ -106,6 +110,12 @@ championships:
   points-win: 3
   points-draw: 1
   points-loss: 0
+  playoffs-enabled: true
+  playoff-qualifiers: 8
+  playoff-min-teams: 4
+  group-count: 8
+  teams-per-group: 2
+  advance-per-group: 1
 
 # ---------------------------------------------------------------------
 # Ball physics - the heart of the plugin.

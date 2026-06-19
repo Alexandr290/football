@@ -12,12 +12,12 @@ import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.entity.Player;
 
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Dynamic stadium crowd audio using real-life recordings (resource pack) that react to
- * match tension, saves, attacks, goals, and set-piece moments. Falls back to vanilla
- * sounds when the crowd pack is not loaded.
+ * Dynamic stadium crowd audio. Uses vanilla NPC voice sounds when the crowd
+ * resource pack is disabled; optional real recordings when enabled.
  */
 public final class CrowdAudio {
 
@@ -30,10 +30,14 @@ public final class CrowdAudio {
 
     private double intensity;
     private int ambienceTick;
+    private int shoutTick;
     private int dangerCooldown;
     private int saveCooldown;
     private int celebrationTicks;
     private TeamSide celebratingTeam;
+
+    private List<Location> standPoints;
+    private double lastAttackFactor;
 
     public CrowdAudio(SoccerPlugin plugin, Game game) {
         this.plugin = plugin;
@@ -53,12 +57,22 @@ public final class CrowdAudio {
 
         double target = computeTargetIntensity();
         intensity = intensity * INTENSITY_SMOOTHING + target * (1.0 - INTENSITY_SMOOTHING);
+        lastAttackFactor = currentAttackFactor();
+
+        shoutTick++;
+        int shoutInterval = VanillaNpcCrowd.shoutIntervalTicks(lastAttackFactor);
+        if (shoutTick >= shoutInterval) {
+            shoutTick = 0;
+            playNpcShoutLayer(lastAttackFactor);
+        }
 
         ambienceTick++;
-        int interval = ambienceInterval();
-        if (ambienceTick >= interval) {
-            ambienceTick = 0;
-            playAmbienceLayer();
+        if (!useVanillaNpcCrowd()) {
+            int interval = ambienceInterval();
+            if (ambienceTick >= interval) {
+                ambienceTick = 0;
+                playAmbienceLayer();
+            }
         }
 
         if (game.getState().isLive() && !game.isCelebrating()) {
@@ -70,7 +84,7 @@ public final class CrowdAudio {
         if (!settings.crowdEnabled) {
             return;
         }
-        playCrowd(CrowdSound.AMBIENCE_LOW, 0.45f, randomPitch(0.95f, 1.05f));
+        playNpcShout(VanillaNpcCrowd.VOL_MIDFIELD * 0.85f);
     }
 
     public void onKickoff() {
@@ -78,8 +92,8 @@ public final class CrowdAudio {
             return;
         }
         intensity = Math.max(intensity, 0.45);
+        playNpcShout(VanillaNpcCrowd.VOL_ATTACK * 0.75f);
         playCrowd(CrowdSound.KICKOFF, 0.55f, 1.0f);
-        playCrowd(CrowdSound.AMBIENCE_MEDIUM, 0.35f, 1.0f);
     }
 
     public void onGoal(TeamSide scoringTeam, boolean ownGoal) {
@@ -91,9 +105,8 @@ public final class CrowdAudio {
         intensity = 1.0;
 
         float homeBias = ownGoal ? 0.65f : 1.0f;
-        playCrowd(CrowdSound.GOAL_CHEER, 0.85f * homeBias, teamPitch(scoringTeam));
-        playCrowd(CrowdSound.AMBIENCE_HIGH, 0.55f * homeBias, teamPitch(scoringTeam));
-        playChantBurst(scoringTeam, 2);
+        playGoalNpcBurst(homeBias);
+        playCrowd(CrowdSound.GOAL_CHEER, VanillaNpcCrowd.VOL_GOAL * homeBias, teamPitch(scoringTeam));
     }
 
     public void onSave(TeamSide defendingTeam) {
@@ -106,8 +119,8 @@ public final class CrowdAudio {
         saveCooldown = 30;
         intensity = Math.min(1.0, intensity + 0.35);
 
+        playNpcShout(VanillaNpcCrowd.VOL_ATTACK);
         playCrowd(CrowdSound.APPLAUSE, 0.5f, 0.95f);
-        playCrowd(CrowdSound.STINGER, 0.4f, 1.1f);
     }
 
     public void onNearMiss() {
@@ -120,28 +133,68 @@ public final class CrowdAudio {
         dangerCooldown = 25;
         intensity = Math.min(1.0, intensity + 0.4);
 
+        playNpcShout(VanillaNpcCrowd.VOL_DANGER);
         playCrowd(CrowdSound.GASP, 0.55f, 0.9f + ThreadLocalRandom.current().nextFloat() * 0.15f);
-        playCrowd(CrowdSound.STINGER, 0.35f, 1.2f);
     }
 
     public void onFullTime() {
         if (!settings.crowdEnabled) {
             return;
         }
+        playNpcShout(VanillaNpcCrowd.VOL_MIDFIELD);
         playCrowd(CrowdSound.APPLAUSE, 0.6f, 1.0f);
-        playCrowd(CrowdSound.AMBIENCE_MEDIUM, 0.4f, 0.95f);
     }
 
     private void tickGoalCelebration() {
         celebrationTicks--;
-        if (celebrationTicks % 12 == 0) {
-            playCrowd(CrowdSound.GOAL_CHEER, 0.5f, teamPitch(celebratingTeam));
-            playChantBurst(celebratingTeam, 1);
+        if (celebrationTicks % 10 == 0) {
+            playGoalNpcBurst(1.0f);
+            playCrowd(CrowdSound.GOAL_CHEER, 0.65f, teamPitch(celebratingTeam));
         }
         if (celebrationTicks <= 0) {
             celebratingTeam = null;
             intensity = 0.5;
         }
+    }
+
+    private void playNpcShoutLayer(double attackFactor) {
+        if (!game.getState().isLive() && game.getState() != GameState.THROW_IN) {
+            return;
+        }
+        float volume = VanillaNpcCrowd.volumeForAttackFactor(attackFactor);
+        playNpcShout(volume);
+
+        if (attackFactor > 0.72 && ThreadLocalRandom.current().nextInt(3) == 0) {
+            playNpcShout(volume * 0.85f);
+        }
+    }
+
+    private void playNpcShout(float volume) {
+        List<Location> stands = stands();
+        game.forEachParticipant(player -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            VanillaNpcCrowd.playShout(player, stands, volume, settings.crowdVolume);
+        });
+    }
+
+    private void playGoalNpcBurst(float bias) {
+        List<Location> stands = stands();
+        game.forEachParticipant(player -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            VanillaNpcCrowd.playGoalBurst(player, stands, settings.crowdVolume * bias);
+        });
+    }
+
+    private double currentAttackFactor() {
+        Ball ball = game.getBall();
+        if (ball == null || ball.getLocation() == null) {
+            return 0.0;
+        }
+        return VanillaNpcCrowd.attackFactor(arena, ball.getLocation());
     }
 
     private double computeTargetIntensity() {
@@ -167,34 +220,10 @@ public final class CrowdAudio {
             return 0.15;
         }
 
-        double base = 0.18;
+        double attack = lastAttackFactor;
         double speed = ball.getSpeed();
-        double speedFactor = Math.min(1.0, speed / settings.maxSpeed) * 0.28;
-
-        double goalProximity = goalThreat(ball.getLocation());
-        double possessionFactor = 0.0;
-        TeamSide lastTouch = ball.getLastTouchTeam();
-        if (lastTouch != null && goalProximity > 0.5) {
-            possessionFactor = 0.12;
-        }
-
-        return Math.min(1.0, base + speedFactor + goalProximity * 0.42 + possessionFactor);
-    }
-
-    private double goalThreat(Location ballLoc) {
-        double best = 0.0;
-        for (TeamSide side : TeamSide.values()) {
-            Location center = goalCenter(side);
-            if (center == null) {
-                continue;
-            }
-            double dx = ballLoc.getX() - center.getX();
-            double dz = ballLoc.getZ() - center.getZ();
-            double horiz = Math.sqrt(dx * dx + dz * dz);
-            double threat = 1.0 - Math.min(1.0, horiz / settings.crowdDangerRadius);
-            best = Math.max(best, threat);
-        }
-        return best;
+        double speedFactor = Math.min(1.0, speed / settings.maxSpeed) * 0.18;
+        return Math.min(1.0, 0.15 + attack * 0.65 + speedFactor);
     }
 
     private void checkDangerousAttack() {
@@ -207,19 +236,18 @@ public final class CrowdAudio {
             return;
         }
 
-        Location loc = ball.getLocation();
-        double threat = goalThreat(loc);
-        if (threat < 0.55 || ball.getSpeed() < settings.crowdDangerMinSpeed) {
+        double attack = VanillaNpcCrowd.attackFactor(arena, ball.getLocation());
+        if (attack < 0.62 || ball.getSpeed() < settings.crowdDangerMinSpeed) {
             return;
         }
 
-        dangerCooldown = 35;
+        dangerCooldown = 28;
         intensity = Math.min(1.0, intensity + 0.25);
-        float vol = (float) (0.25 + threat * 0.35);
-        playCrowd(CrowdSound.AMBIENCE_HIGH, vol, 0.95f + (float) threat * 0.1f);
-        playCrowd(CrowdSound.GASP, vol * 0.6f, 1.05f);
+        float vol = VanillaNpcCrowd.volumeForAttackFactor(attack);
+        playNpcShout(vol);
+        playCrowd(CrowdSound.GASP, vol * 0.55f, 1.05f);
 
-        if (threat > 0.82 && ball.getSpeed() > settings.crowdDangerMinSpeed * 1.4) {
+        if (attack > 0.85 && ball.getSpeed() > settings.crowdDangerMinSpeed * 1.3) {
             onNearMiss();
         }
     }
@@ -237,40 +265,23 @@ public final class CrowdAudio {
 
         if (intensity < 0.55) {
             playCrowd(CrowdSound.AMBIENCE_MEDIUM, vol * 0.5f, randomPitch(0.95f, 1.05f));
-            if (rng.nextInt(3) == 0) {
-                playCrowd(CrowdSound.AMBIENCE_LOW, vol * 0.35f, randomPitch(0.9f, 1.1f));
-            }
             return;
         }
 
         if (intensity < 0.8) {
             playCrowd(CrowdSound.AMBIENCE_HIGH, vol * 0.45f, randomPitch(0.95f, 1.08f));
-            if (rng.nextInt(2) == 0) {
-                playCrowd(CrowdSound.CHANT, vol * 0.4f, randomPitch(0.92f, 1.12f));
-            }
             return;
         }
 
         playCrowd(CrowdSound.AMBIENCE_HIGH, vol * 0.65f, randomPitch(1.0f, 1.12f));
-        playCrowd(CrowdSound.CHANT, vol * 0.45f, randomPitch(0.95f, 1.1f));
-        if (rng.nextInt(3) == 0) {
-            playCrowd(CrowdSound.GASP, vol * 0.25f, 1.15f);
-        }
-    }
-
-    private void playChantBurst(TeamSide team, int beats) {
-        float pitch = teamPitch(team);
-        for (int i = 0; i < beats; i++) {
-            final int delay = i * 4;
-            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
-                playCrowd(CrowdSound.CHANT, 0.45f, pitch);
-            }, delay);
-        }
     }
 
     private void playCrowd(CrowdSound sound, float volume, float pitch) {
+        if (useVanillaNpcCrowd() && sound != CrowdSound.GOAL_CHEER && sound != CrowdSound.GASP) {
+            return;
+        }
         float scaled = volume * (float) settings.crowdVolume;
-        Location stands = standLocation();
+        List<Location> stands = stands();
         game.forEachParticipant(player -> {
             if (!player.isOnline()) {
                 return;
@@ -279,16 +290,34 @@ public final class CrowdAudio {
         });
     }
 
-    private void playFor(Player player, Location stands, CrowdSound sound, float volume, float pitch) {
-        Location at = stands != null ? stands : player.getLocation();
+    private void playFor(Player player, List<Location> stands, CrowdSound sound, float volume, float pitch) {
+        Location at = pickNearestStand(stands, player.getLocation());
         if (plugin.crowdPack().canPlay(player)) {
             player.playSound(at, sound.key(), SoundCategory.VOICE, volume, pitch);
             return;
         }
         Sound fallback = sound.fallback();
         if (fallback != null) {
-            player.playSound(at, fallback, volume, pitch);
+            player.playSound(at, fallback, SoundCategory.VOICE, volume, pitch);
         }
+    }
+
+    private boolean useVanillaNpcCrowd() {
+        return !plugin.crowdPack().useRealSounds();
+    }
+
+    private List<Location> stands() {
+        if (standPoints == null) {
+            standPoints = VanillaNpcCrowd.buildStandPoints(arena);
+        }
+        return standPoints;
+    }
+
+    private Location pickNearestStand(List<Location> stands, Location near) {
+        if (stands.isEmpty()) {
+            return near;
+        }
+        return stands.get(ThreadLocalRandom.current().nextInt(stands.size()));
     }
 
     private float teamPitch(TeamSide team) {
@@ -302,26 +331,5 @@ public final class CrowdAudio {
     private int ambienceInterval() {
         int base = Math.max(8, settings.crowdAmbienceInterval);
         return (int) Math.max(8, base - intensity * base * 0.5);
-    }
-
-    private Location goalCenter(TeamSide defendedBy) {
-        if (arena.getGoal(defendedBy) == null) {
-            return null;
-        }
-        return arena.getGoal(defendedBy).getCenter();
-    }
-
-    private Location standLocation() {
-        Location spec = arena.getSpectator();
-        if (spec != null) {
-            return spec.clone();
-        }
-        if (arena.getField() != null) {
-            return arena.getField().getCenter().clone().add(0, 8, 0);
-        }
-        if (arena.getBallSpawn() != null) {
-            return arena.getBallSpawn().clone().add(0, 8, 0);
-        }
-        return null;
     }
 }

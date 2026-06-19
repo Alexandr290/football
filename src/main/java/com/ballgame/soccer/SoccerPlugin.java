@@ -11,6 +11,7 @@ import com.ballgame.soccer.crowd.CrowdResourcePack;
 import com.ballgame.soccer.game.GameManager;
 import com.ballgame.soccer.listener.BallProtectionListener;
 import com.ballgame.soccer.listener.ChampionshipGuiListener;
+import com.ballgame.soccer.listener.ChampionshipRenameListener;
 import com.ballgame.soccer.listener.CrowdPackListener;
 import com.ballgame.soccer.listener.PlayerActionListener;
 import com.ballgame.soccer.listener.PlayerConnectionListener;
@@ -104,6 +105,7 @@ public final class SoccerPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new BallProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
         getServer().getPluginManager().registerEvents(new ChampionshipGuiListener(), this);
+        getServer().getPluginManager().registerEvents(new ChampionshipRenameListener(this), this);
         getServer().getPluginManager().registerEvents(new CrowdPackListener(this), this);
     }
 
