@@ -5,7 +5,7 @@
 # the game without touching code. Colors use '&' codes (and hex &#RRGGBB).
 # =====================================================================
 
-config-version: 10
+config-version: 15
 
 settings:
   # Chat prefix (overrides the language file prefix when set).
@@ -46,8 +46,48 @@ game:
   # When true, the ball crossing a touchline (sideline) triggers a throw-in restart.
   # When false, the ball is reset to center instead.
   throw-in-enabled: true
+  # When true, offside is enforced (IFAB rules): judged when the ball is played,
+  # penalised when an offside attacker becomes involved. Indirect free kick restart.
+  offside-enabled: true
+  # Auto-select the nearest defending-team player, teleport them to the ball, and
+  # require them to take the indirect free kick.
+  offside-auto-taker: true
+  offside-taker-only-kick: true
+  offside-taker-glow: true
+  offside-taker-particles: true
+  offside-taker-snap-back: true
+  offside-taker-wander-blocks: 2.0
+  # Keep offside attackers away from the restart spot until the kick is taken.
+  offside-restrain-opponents: true
+  offside-opponent-restrain-radius: 8.0
+  offside-opponent-min-gap: 3.0
   # TV-style score + ascending match clock at the top of the screen during play.
   broadcast-hud: true
+  # When true, /soccer quickjoin opens a menu to pick Red or Blue before joining.
+  # Use /soccer quickjoin red|blue to skip the menu and join a side directly.
+  quickjoin-team-pick: true
+
+# ---------------------------------------------------------------------
+# Match referee — center official + two assistant referees (linesmen).
+# ---------------------------------------------------------------------
+referee:
+  enabled: true
+  # auto = Mannequin player body on 1.21.4+, else armor stand | mannequin | armor_stand
+  entity-type: auto
+  # Optional Base64 skin texture (same format as ball.head-texture). Blank = default Steve/Alex.
+  skin-texture: ""
+  name: "Referee"
+  assistant-names:
+    - "AR 1"
+    - "AR 2"
+  # Lateral distance from play (blocks) — refs run diagonally, not on top of the ball.
+  follow-distance: 5.5
+  # How far behind the ball (as a fraction of pitch length) the center ref trails play.
+  trail-offset: 0.045
+  walk-speed: 0.16
+  sprint-speed: 0.30
+  sprint-threshold: 4.0
+  whistle-enabled: true
 
 # ---------------------------------------------------------------------
 # Goal replay — TV-style cinematic playback after every goal.
@@ -82,9 +122,11 @@ replay:
 crowd:
   enabled: true
   volume: 0.85
-  # false = vanilla NPC shouts from the stands (no resource pack needed).
+  # false = vanilla crowd ambience + shouts (no resource pack needed).
+  # true = real stadium recordings (requires resource pack — see /soccer crowdpack).
   real-sounds: false
-  ambience-interval-ticks: 14
+  # Ticks between ambience bed layers (20 ticks = 1 sec). Lower = denser continuous crowd.
+  ambience-interval-ticks: 8
   danger-radius: 18.0
   danger-min-speed: 0.75
   goal-celebration: true

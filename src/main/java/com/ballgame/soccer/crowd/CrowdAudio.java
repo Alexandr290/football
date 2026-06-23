@@ -16,12 +16,13 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Dynamic stadium crowd audio. Uses vanilla NPC voice sounds when the crowd
- * resource pack is disabled; optional real recordings when enabled.
+ * Dynamic stadium crowd audio for the full match (kickoff through full time).
+ * Layers a continuous ambience bed with reactive shouts, chants, and event stingers.
  */
 public final class CrowdAudio {
 
-    private static final double INTENSITY_SMOOTHING = 0.88;
+    private static final double INTENSITY_SMOOTHING = 0.82;
+    private static final double MATCH_FLOOR_INTENSITY = 0.32;
 
     private final SoccerPlugin plugin;
     private final Game game;
@@ -31,6 +32,7 @@ public final class CrowdAudio {
     private double intensity;
     private int ambienceTick;
     private int shoutTick;
+    private int chantTick;
     private int dangerCooldown;
     private int saveCooldown;
     private int celebrationTicks;
@@ -44,6 +46,7 @@ public final class CrowdAudio {
         this.game = game;
         this.arena = game.getArena();
         this.settings = plugin.settings();
+        this.intensity = MATCH_FLOOR_INTENSITY;
     }
 
     public void tick() {
@@ -54,10 +57,19 @@ public final class CrowdAudio {
             tickGoalCelebration();
             return;
         }
+        if (!game.getState().hasStadiumCrowd()) {
+            return;
+        }
 
         double target = computeTargetIntensity();
         intensity = intensity * INTENSITY_SMOOTHING + target * (1.0 - INTENSITY_SMOOTHING);
         lastAttackFactor = currentAttackFactor();
+
+        ambienceTick++;
+        if (ambienceTick >= ambienceInterval()) {
+            ambienceTick = 0;
+            playAmbienceLayer();
+        }
 
         shoutTick++;
         int shoutInterval = VanillaNpcCrowd.shoutIntervalTicks(lastAttackFactor);
@@ -66,13 +78,10 @@ public final class CrowdAudio {
             playNpcShoutLayer(lastAttackFactor);
         }
 
-        ambienceTick++;
-        if (!useVanillaNpcCrowd()) {
-            int interval = ambienceInterval();
-            if (ambienceTick >= interval) {
-                ambienceTick = 0;
-                playAmbienceLayer();
-            }
+        chantTick++;
+        if (chantTick >= chantInterval()) {
+            chantTick = 0;
+            playChantLayer();
         }
 
         if (game.getState().isLive() && !game.isCelebrating()) {
@@ -91,9 +100,10 @@ public final class CrowdAudio {
         if (!settings.crowdEnabled) {
             return;
         }
-        intensity = Math.max(intensity, 0.45);
+        intensity = Math.max(intensity, 0.5);
         playNpcShout(VanillaNpcCrowd.VOL_ATTACK * 0.75f);
         playCrowd(CrowdSound.KICKOFF, 0.55f, 1.0f);
+        playCrowd(CrowdSound.AMBIENCE_MEDIUM, 0.45f, 1.0f);
     }
 
     public void onGoal(TeamSide scoringTeam, boolean ownGoal) {
@@ -153,20 +163,25 @@ public final class CrowdAudio {
         }
         if (celebrationTicks <= 0) {
             celebratingTeam = null;
-            intensity = 0.5;
+            intensity = Math.max(MATCH_FLOOR_INTENSITY, 0.5);
         }
     }
 
     private void playNpcShoutLayer(double attackFactor) {
-        if (!game.getState().isLive() && game.getState() != GameState.THROW_IN) {
-            return;
-        }
         float volume = VanillaNpcCrowd.volumeForAttackFactor(attackFactor);
         playNpcShout(volume);
 
-        if (attackFactor > 0.72 && ThreadLocalRandom.current().nextInt(3) == 0) {
+        if (attackFactor > 0.55 && ThreadLocalRandom.current().nextInt(3) == 0) {
             playNpcShout(volume * 0.85f);
         }
+    }
+
+    private void playChantLayer() {
+        if (intensity < 0.28) {
+            return;
+        }
+        float vol = (float) (0.25 + intensity * 0.35);
+        playCrowd(CrowdSound.CHANT, vol, randomPitch(0.9f, 1.12f));
     }
 
     private void playNpcShout(float volume) {
@@ -200,30 +215,30 @@ public final class CrowdAudio {
     private double computeTargetIntensity() {
         GameState state = game.getState();
         if (state == GameState.REPLAY) {
-            return 0.75;
+            return 0.72;
         }
         if (game.isCelebrating()) {
             return 0.95;
         }
-        if (state == GameState.KICKOFF || state == GameState.COUNTDOWN) {
-            return 0.35;
-        }
-        if (state == GameState.HALFTIME) {
-            return 0.2;
-        }
-        if (!state.isLive()) {
-            return 0.05;
-        }
+
+        double phaseBase = switch (state) {
+            case KICKOFF -> 0.45;
+            case HALFTIME -> 0.38;
+            case PENALTIES -> 0.52;
+            case THROW_IN, OFFSIDE -> 0.42;
+            case PLAYING, EXTRA_TIME -> MATCH_FLOOR_INTENSITY;
+            default -> MATCH_FLOOR_INTENSITY;
+        };
 
         Ball ball = game.getBall();
         if (ball == null || ball.getLocation() == null) {
-            return 0.15;
+            return phaseBase;
         }
 
-        double attack = lastAttackFactor;
+        double attack = VanillaNpcCrowd.attackFactor(arena, ball.getLocation());
         double speed = ball.getSpeed();
-        double speedFactor = Math.min(1.0, speed / settings.maxSpeed) * 0.18;
-        return Math.min(1.0, 0.15 + attack * 0.65 + speedFactor);
+        double speedFactor = Math.min(1.0, speed / settings.maxSpeed) * 0.2;
+        return Math.min(1.0, phaseBase + attack * 0.55 + speedFactor);
     }
 
     private void checkDangerousAttack() {
@@ -252,34 +267,23 @@ public final class CrowdAudio {
         }
     }
 
+    /**
+     * Continuous stadium bed: always keep a low layer going, add louder layers as intensity rises.
+     */
     private void playAmbienceLayer() {
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
-        float vol = (float) (settings.crowdVolume * (0.4 + intensity * 0.6));
+        float scale = (float) (0.45 + intensity * 0.55);
 
-        if (intensity < 0.25) {
-            if (rng.nextInt(3) == 0) {
-                playCrowd(CrowdSound.AMBIENCE_LOW, vol * 0.55f, randomPitch(0.92f, 1.08f));
-            }
-            return;
+        playCrowd(CrowdSound.AMBIENCE_LOW, scale * 0.62f, randomPitch(0.94f, 1.06f));
+
+        if (intensity >= 0.3) {
+            playCrowd(CrowdSound.AMBIENCE_MEDIUM, scale * 0.48f, randomPitch(0.95f, 1.05f));
         }
-
-        if (intensity < 0.55) {
-            playCrowd(CrowdSound.AMBIENCE_MEDIUM, vol * 0.5f, randomPitch(0.95f, 1.05f));
-            return;
+        if (intensity >= 0.55) {
+            playCrowd(CrowdSound.AMBIENCE_HIGH, scale * 0.42f, randomPitch(0.96f, 1.1f));
         }
-
-        if (intensity < 0.8) {
-            playCrowd(CrowdSound.AMBIENCE_HIGH, vol * 0.45f, randomPitch(0.95f, 1.08f));
-            return;
-        }
-
-        playCrowd(CrowdSound.AMBIENCE_HIGH, vol * 0.65f, randomPitch(1.0f, 1.12f));
     }
 
     private void playCrowd(CrowdSound sound, float volume, float pitch) {
-        if (useVanillaNpcCrowd() && sound != CrowdSound.GOAL_CHEER && sound != CrowdSound.GASP) {
-            return;
-        }
         float scaled = volume * (float) settings.crowdVolume;
         List<Location> stands = stands();
         game.forEachParticipant(player -> {
@@ -292,18 +296,17 @@ public final class CrowdAudio {
 
     private void playFor(Player player, List<Location> stands, CrowdSound sound, float volume, float pitch) {
         Location at = pickNearestStand(stands, player.getLocation());
-        if (plugin.crowdPack().canPlay(player)) {
-            player.playSound(at, sound.key(), SoundCategory.VOICE, volume, pitch);
+
+        if (plugin.crowdPack().useRealSounds() && plugin.crowdPack().isReady()
+                && plugin.crowdPack().canPlayCustom(player)) {
+            player.playSound(at, sound.key(), SoundCategory.RECORDS, volume, pitch);
             return;
         }
+
         Sound fallback = sound.fallback();
         if (fallback != null) {
-            player.playSound(at, fallback, SoundCategory.VOICE, volume, pitch);
+            player.playSound(at, fallback, SoundCategory.NEUTRAL, volume, pitch);
         }
-    }
-
-    private boolean useVanillaNpcCrowd() {
-        return !plugin.crowdPack().useRealSounds();
     }
 
     private List<Location> stands() {
@@ -329,7 +332,11 @@ public final class CrowdAudio {
     }
 
     private int ambienceInterval() {
-        int base = Math.max(8, settings.crowdAmbienceInterval);
-        return (int) Math.max(8, base - intensity * base * 0.5);
+        int base = Math.max(6, settings.crowdAmbienceInterval);
+        return (int) Math.max(6, base - intensity * base * 0.55);
+    }
+
+    private int chantInterval() {
+        return (int) Math.max(40, 90 - intensity * 45);
     }
 }

@@ -122,12 +122,22 @@ public final class CrowdResourcePack {
     }
 
     public boolean canPlay(Player player) {
+        return canPlayCustom(player);
+    }
+
+    /**
+     * Whether to layer real stadium recordings on top of vanilla fallbacks.
+     * Requires the client to have the crowd resource pack (manual install or server download).
+     */
+    public boolean canPlayCustom(Player player) {
         if (!useRealSounds() || !isReady()) {
             return false;
         }
         CrowdPackMode mode = plugin.settings().crowdPackMode;
         if (mode == CrowdPackMode.MANUAL) {
-            return true;
+            // Server cannot detect a locally installed pack; players opt in via /soccer crowdpack ack
+            // or by accepting a server-offered download.
+            return accepted.contains(player.getUniqueId());
         }
         return accepted.contains(player.getUniqueId());
     }

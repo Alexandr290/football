@@ -1,6 +1,7 @@
 package com.ballgame.soccer.listener;
 
 import com.ballgame.soccer.SoccerPlugin;
+import com.ballgame.soccer.referee.RefereeMetadata;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -27,6 +28,10 @@ public final class BallProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
+        if (RefereeMetadata.isReferee(event.getEntity())) {
+            event.setCancelled(true);
+            return;
+        }
         if (event.getEntity() instanceof Player player
                 && plugin.games().isPlaying(player)) {
             event.setCancelled(true);
@@ -65,6 +70,10 @@ public final class BallProtectionListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onInteractEntity(PlayerInteractAtEntityEvent event) {
+        if (RefereeMetadata.isReferee(event.getRightClicked())) {
+            event.setCancelled(true);
+            return;
+        }
         // Prevent rotating/equipping the ball's display entity.
         if (event.getRightClicked() instanceof org.bukkit.entity.ItemDisplay) {
             event.setCancelled(true);

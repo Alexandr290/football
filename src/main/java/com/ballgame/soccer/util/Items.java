@@ -50,36 +50,40 @@ public final class Items {
     }
 
     /**
-     * Build a player head from a Base64-encoded texture property. The Base64
-     * decodes to JSON containing a texture URL, which we feed into the modern
-     * {@link PlayerProfile} API.
-     *
-     * @return a textured head, or a plain head if decoding fails.
+     * Build a {@link PlayerProfile} from a Base64 skin property (same format as
+     * skull textures). Returns a named profile with no custom skin if decoding fails.
      */
-    public static ItemStack headFromBase64(String base64) {
-        ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+    public static PlayerProfile profileFromBase64(String base64, UUID id, String name) {
+        PlayerProfile profile = Bukkit.createPlayerProfile(id, name);
         if (base64 == null || base64.isEmpty()) {
-            return head;
+            return profile;
         }
         try {
             String json = new String(Base64.getDecoder().decode(base64));
             Matcher matcher = URL_PATTERN.matcher(json);
             if (!matcher.find()) {
-                return head;
+                return profile;
             }
             URL url = new URL(matcher.group(1));
-            PlayerProfile profile = Bukkit.createPlayerProfile(UUID.randomUUID());
             PlayerTextures textures = profile.getTextures();
             textures.setSkin(url);
             profile.setTextures(textures);
-
-            SkullMeta meta = (SkullMeta) head.getItemMeta();
-            if (meta != null) {
-                meta.setOwnerProfile(profile);
-                head.setItemMeta(meta);
-            }
         } catch (Exception ignored) {
-            // Fall back to a plain head if anything goes wrong.
+            // Plain Steve/Alex profile.
+        }
+        return profile;
+    }
+
+    public static ItemStack headFromBase64(String base64) {
+        ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+        if (base64 == null || base64.isEmpty()) {
+            return head;
+        }
+        PlayerProfile profile = profileFromBase64(base64, UUID.randomUUID(), null);
+        SkullMeta meta = (SkullMeta) head.getItemMeta();
+        if (meta != null) {
+            meta.setOwnerProfile(profile);
+            head.setItemMeta(meta);
         }
         return head;
     }

@@ -6,14 +6,19 @@ import com.ballgame.soccer.arena.BoundaryExit;
 import com.ballgame.soccer.ball.Ball;
 import com.ballgame.soccer.config.SoccerSettings;
 import com.ballgame.soccer.crowd.CrowdAudio;
+import com.ballgame.soccer.crowd.CrowdPackMode;
 import com.ballgame.soccer.event.BallKickEvent;
 import com.ballgame.soccer.event.GoalScoredEvent;
 import com.ballgame.soccer.event.MatchStateChangeEvent;
+import com.ballgame.soccer.event.OffsideEvent;
 import com.ballgame.soccer.mechanics.Mechanics;
+import com.ballgame.soccer.mechanics.OffsideChecker;
+import com.ballgame.soccer.mechanics.OffsideSnapshot;
 import com.ballgame.soccer.scoreboard.MatchScoreboard;
 import com.ballgame.soccer.replay.GoalReplay;
 import com.ballgame.soccer.replay.ReplayAnimationTracker;
 import com.ballgame.soccer.replay.ReplayRecorder;
+import com.ballgame.soccer.referee.RefereeController;
 import com.ballgame.soccer.util.ActionBar;
 import com.ballgame.soccer.util.MatchBroadcastHud;
 import com.ballgame.soccer.util.Text;
@@ -86,12 +91,29 @@ public final class Game {
     /** Match phase to return to after the throw-in is taken. */
     private GameState resumeAfterThrowIn = GameState.PLAYING;
 
+    /** Cached pitch axis for offside line geometry. */
+    private OffsideChecker.PitchAxis pitchAxis;
+    /** Positions at the moment the ball was last played by a teammate. */
+    private OffsideSnapshot pendingOffsideCheck;
+    /** Team awarded the indirect free kick after offside. */
+    private TeamSide freeKickTeam;
+    /** Match phase to return to after the free kick is taken. */
+    private GameState resumeAfterFreeKick = GameState.PLAYING;
+    /** Designated player who must take the offside free kick. */
+    private UUID freeKickTakerId;
+    /** Cached restart spot for snap-back and taker placement. */
+    private Location freeKickSpot;
+    private int offsideRestartPulse;
+    /** Next touch is exempt (throw-in, goal kick / center reset, kickoff). */
+    private boolean offsideExemptTouch;
+
     private ReplayRecorder replayRecorder;
     private ReplayAnimationTracker replayAnimations;
     private GoalReplay goalReplay;
     private GameState stateBeforeReplay;
 
     private CrowdAudio crowd;
+    private RefereeController referee;
 
     private String championshipId;
     private String fixtureId;
@@ -129,6 +151,9 @@ public final class Game {
             return false;
         }
         TeamSide team = forceTeam != null ? forceTeam : pickBalancedTeam();
+        if (isTeamFull(team)) {
+            return false;
+        }
         SoccerPlayer sp = new SoccerPlayer(player, team, settings.maxStamina);
         snapshots.put(player.getUniqueId(), PlayerSnapshot.capture(player));
         players.put(player.getUniqueId(), sp);
@@ -146,6 +171,7 @@ public final class Game {
         }
         plugin.messages().send(player, "joined-queue",
                 "arena", arena.getName(), "team", teamName(team));
+        promptCrowdPackIfNeeded(player);
         broadcast(plugin.messages().format("player-joined",
                 "team_color", teamChat(team),
                 "player", player.getName(),
@@ -176,9 +202,17 @@ public final class Game {
         }
         broadcast(plugin.messages().format("player-left", "player", player.getName()));
 
+        if (state == GameState.OFFSIDE && freeKickTakerId != null
+                && player.getUniqueId().equals(freeKickTakerId)) {
+            freeKickTakerId = null;
+            if (settings.offsideAutoTaker) {
+                reassignFreeKickTaker(false);
+            }
+        }
+
         // If the match is live and a team becomes empty, end it.
         if (state.isLive() || state == GameState.KICKOFF || state == GameState.HALFTIME
-                || state == GameState.THROW_IN) {
+                || state == GameState.THROW_IN || state == GameState.OFFSIDE) {
             if (countTeam(TeamSide.RED) == 0 || countTeam(TeamSide.BLUE) == 0) {
                 finishMatch();
             }
@@ -187,6 +221,25 @@ public final class Game {
             setState(GameState.WAITING);
             broadcast(plugin.messages().raw("countdown-cancelled"));
         }
+    }
+
+    private void promptCrowdPackIfNeeded(Player player) {
+        if (!settings.crowdEnabled || !settings.crowdRealSounds) {
+            return;
+        }
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (!players.containsKey(player.getUniqueId()) || !player.isOnline()) {
+                return;
+            }
+            if (plugin.crowdPack().canPlayCustom(player)) {
+                return;
+            }
+            if (settings.crowdPackPromptOnJoin) {
+                plugin.crowdPack().offer(player);
+            } else if (plugin.crowdPack().mode() == CrowdPackMode.MANUAL) {
+                plugin.messages().send(player, "crowd-pack-manual-accept-hint");
+            }
+        }, 30L);
     }
 
     private void preparePlayer(Player player, SoccerPlayer sp) {
@@ -278,6 +331,10 @@ public final class Game {
         replayRecorder = new ReplayRecorder(settings.replayBufferSeconds * 20);
         replayAnimations = new ReplayAnimationTracker();
         crowd = new CrowdAudio(plugin, this);
+        pitchAxis = OffsideChecker.PitchAxis.fromArena(arena);
+        referee = new RefereeController(plugin, this, arena, settings);
+        referee.spawn();
+        clearOffsidePhase();
         ball.spawn(ballSpawnLocation());
         if (settings.broadcastHud) {
             broadcastHud = new MatchBroadcastHud(plugin);
@@ -319,6 +376,7 @@ public final class Game {
         ball.teleport(ballSpawnLocation());
         ball.setFrozen(true);
         ball.clearTouchHistory();
+        clearOffsidePhase();
         celebrating = false;
         for (SoccerPlayer sp : players.values()) {
             Player p = sp.getBukkitPlayer();
@@ -340,6 +398,10 @@ public final class Game {
             ball.setFrozen(false);
         }
         broadcast(plugin.messages().raw("kickoff"));
+        offsideExemptTouch = true;
+        if (referee != null) {
+            referee.onKickoff();
+        }
         forEachPlayer(p -> {
             p.sendTitle(Text.color("&a&lKICK OFF"), "", 0, 25, 10);
             p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 1.5f);
@@ -472,6 +534,10 @@ public final class Game {
         if (crowd != null) {
             crowd.onFullTime();
         }
+        if (referee != null) {
+            referee.remove();
+            referee = null;
+        }
         if (ball != null) {
             ball.setFrozen(true);
         }
@@ -526,6 +592,10 @@ public final class Game {
             broadcastHud.destroy();
             broadcastHud = null;
         }
+        if (referee != null) {
+            referee.remove();
+            referee = null;
+        }
         if (ball != null) {
             ball.remove();
         }
@@ -546,6 +616,12 @@ public final class Game {
 
     public void tick() {
         matchTick++;
+
+        GameState refState = goalReplay != null ? GameState.REPLAY : state;
+        if (referee != null) {
+            referee.tick(refState, celebrating || goalReplay != null, ball,
+                    players.values(), pitchAxis);
+        }
 
         if (goalReplay != null) {
             if (goalReplay.tick()) {
@@ -579,6 +655,8 @@ public final class Game {
                 checkBoundary();
             }
             trackPossession();
+        } else if (state == GameState.OFFSIDE) {
+            tickOffsideRestart();
         }
 
         if (celebrating) {
@@ -653,6 +731,9 @@ public final class Game {
                 // Slow ball at the player's feet: dribble it along.
                 Vector v = p.getVelocity();
                 if (v.getX() * v.getX() + v.getZ() * v.getZ() > 0.0025) {
+                    if (tryHandleOffsideTouch(p, sp.getTeam())) {
+                        continue;
+                    }
                     Vector nudge = Mechanics.dribbleNudge(p, settings);
                     ball.recordTouch(p, sp.getTeam());
                     ball.applyImpulse(nudge, null);
@@ -663,6 +744,9 @@ public final class Game {
     }
 
     private void deflect(SoccerPlayer sp, Player p, Location ballLoc, boolean keeperZone) {
+        if (tryHandleOffsideTouch(p, sp.getTeam())) {
+            return;
+        }
         Vector away = ball.getLocation().toVector().subtract(p.getLocation().toVector());
         away.setY(Math.max(0.1, away.getY()));
         if (away.lengthSquared() < 1.0e-6) {
@@ -754,6 +838,11 @@ public final class Game {
             }
         }
 
+        if (settings.offsideEnabled && !ownGoal && scorer != null
+                && tryOffsideGoalDisallowed(scorer)) {
+            return;
+        }
+
         if (scoringTeam == TeamSide.RED) {
             redScore++;
         } else {
@@ -776,6 +865,9 @@ public final class Game {
                 new GoalScoredEvent(this, scoringTeam, scorer, assist, ownGoal));
 
         showGoalMoment(scoringTeam);
+        if (referee != null) {
+            referee.onGoal();
+        }
         if (crowd != null) {
             crowd.onGoal(scoringTeam, ownGoal);
         }
@@ -914,6 +1006,7 @@ public final class Game {
     }
 
     private void startThrowIn(Location exitLoc) {
+        clearOffsidePhase();
         TeamSide lastTouch = ball.getLastTouchTeam();
         throwInTeam = lastTouch == null ? TeamSide.RED : lastTouch.opposite();
         resumeAfterThrowIn = state;
@@ -924,6 +1017,10 @@ public final class Game {
         ball.clearTouchHistory();
 
         setState(GameState.THROW_IN);
+
+        if (referee != null) {
+            referee.onThrowIn(spot);
+        }
 
         broadcast(plugin.messages().format("throw-in", "team", teamName(throwInTeam)));
 
@@ -949,13 +1046,338 @@ public final class Game {
 
     private void endThrowIn() {
         throwInTeam = null;
+        offsideExemptTouch = true;
         setState(resumeAfterThrowIn);
         forEachPlayer(p -> p.sendTitle(Text.color(plugin.messages().raw("play-on")), "", 0, 20, 10));
+    }
+
+    // ==================================================================
+    // Offside (IFAB: judged at pass, penalised on involvement)
+    // ==================================================================
+
+    private void beginOffsidePhase(Player player, TeamSide team, BallKickEvent.KickType type) {
+        if (!settings.offsideEnabled || pitchAxis == null || ball == null) {
+            pendingOffsideCheck = null;
+            return;
+        }
+        if (type != BallKickEvent.KickType.PASS && type != BallKickEvent.KickType.SHOT) {
+            return;
+        }
+        pendingOffsideCheck = OffsideSnapshot.capture(
+                pitchAxis, team, player.getUniqueId(), ball.getLocation(), players);
+    }
+
+    private void clearOffsidePhase() {
+        pendingOffsideCheck = null;
+        freeKickTeam = null;
+        clearFreeKickRestart();
+    }
+
+    private void clearFreeKickRestart() {
+        if (freeKickTakerId != null) {
+            SoccerPlayer taker = players.get(freeKickTakerId);
+            if (taker != null) {
+                Player player = taker.getBukkitPlayer();
+                if (player != null) {
+                    OffsideRestartHelper.clearParticipantMovement(player);
+                }
+            }
+        }
+        forEachPlayer(OffsideRestartHelper::clearParticipantMovement);
+        freeKickTakerId = null;
+        freeKickSpot = null;
+        offsideRestartPulse = 0;
+    }
+
+    /**
+     * Returns true if play was stopped for offside (touch should not be applied).
+     */
+    private boolean tryHandleOffsideTouch(Player player, TeamSide touchTeam) {
+        if (offsideExemptTouch) {
+            offsideExemptTouch = false;
+            clearOffsidePhase();
+            return false;
+        }
+        if (!settings.offsideEnabled || pendingOffsideCheck == null) {
+            return false;
+        }
+        if (touchTeam != pendingOffsideCheck.getAttackingTeam()) {
+            clearOffsidePhase();
+            return false;
+        }
+        if (player.getUniqueId().equals(pendingOffsideCheck.getPlayedBy())) {
+            return false;
+        }
+        if (!pendingOffsideCheck.wasOffside(player.getUniqueId())) {
+            return false;
+        }
+        SoccerPlayer sp = players.get(player.getUniqueId());
+        if (sp == null) {
+            return false;
+        }
+        callOffside(sp, player.getLocation());
+        return true;
+    }
+
+    private boolean tryOffsideGoalDisallowed(SoccerPlayer scorer) {
+        if (pendingOffsideCheck == null
+                || pendingOffsideCheck.getAttackingTeam() != scorer.getTeam()) {
+            return false;
+        }
+        if (!pendingOffsideCheck.wasOffside(scorer.getUuid())) {
+            return false;
+        }
+        Player p = scorer.getBukkitPlayer();
+        Location spot = p != null ? p.getLocation() : ball.getLocation();
+        callOffside(scorer, spot);
+        return true;
+    }
+
+    private void callOffside(SoccerPlayer offender, Location spot) {
+        if (state != GameState.PLAYING && state != GameState.EXTRA_TIME) {
+            return;
+        }
+        TeamSide attacking = offender.getTeam();
+        TeamSide defending = attacking.opposite();
+        Location restart = pitchAxis != null ? pitchAxis.clampToField(spot) : spot;
+        if (restart == null) {
+            restart = spot;
+        }
+
+        OffsideEvent event = new OffsideEvent(this, offender, attacking, defending, restart);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) {
+            clearOffsidePhase();
+            return;
+        }
+
+        clearOffsidePhase();
+        resumeAfterFreeKick = state;
+        freeKickTeam = defending;
+
+        ball.teleport(restart);
+        ball.setFrozen(true);
+        ball.clearTouchHistory();
+
+        setState(GameState.OFFSIDE);
+
+        if (referee != null) {
+            referee.onOffside(restart);
+        }
+
+        broadcast(plugin.messages().format("offside",
+                "player", offender.getName(), "team", teamName(defending)));
+
+        assignFreeKickTaker(restart, defending);
+        notifyOffsideRestart();
+    }
+
+    private void assignFreeKickTaker(Location restart, TeamSide defending) {
+        freeKickSpot = restart.clone();
+        freeKickTakerId = null;
+        if (!settings.offsideAutoTaker) {
+            return;
+        }
+        SoccerPlayer taker = OffsideRestartHelper.findNearestTaker(players, defending, restart);
+        if (taker == null) {
+            return;
+        }
+        applyFreeKickTaker(taker, restart, defending, true);
+    }
+
+    private void reassignFreeKickTaker(boolean announce) {
+        if (state != GameState.OFFSIDE || freeKickTeam == null || freeKickSpot == null) {
+            return;
+        }
+        SoccerPlayer previous = freeKickTakerId != null ? players.get(freeKickTakerId) : null;
+        if (previous != null) {
+            Player previousPlayer = previous.getBukkitPlayer();
+            if (previousPlayer != null) {
+                OffsideRestartHelper.clearParticipantMovement(previousPlayer);
+            }
+        }
+        SoccerPlayer taker = OffsideRestartHelper.findNearestTaker(players, freeKickTeam, freeKickSpot);
+        if (taker == null) {
+            return;
+        }
+        applyFreeKickTaker(taker, freeKickSpot, freeKickTeam, announce);
+    }
+
+    private void applyFreeKickTaker(SoccerPlayer taker, Location restart, TeamSide defending, boolean announce) {
+        if (taker == null || restart == null) {
+            return;
+        }
+        Player player = taker.getBukkitPlayer();
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+
+        freeKickTakerId = taker.getUuid();
+        Location takerSpot = OffsideRestartHelper.computeTakerSpot(restart, pitchAxis, defending);
+        player.teleport(takerSpot);
+        OffsideRestartHelper.applyTakerVisuals(player, settings);
+        scheduleMovementReset();
+
+        if (announce) {
+            broadcast(plugin.messages().format("offside-taker-assigned", "player", taker.getName()));
+            notifyOffsideRestart();
+        }
+    }
+
+    private void notifyOffsideRestart() {
+        String takerName = freeKickTakerName();
+        forEachPlayer(p -> {
+            SoccerPlayer sp = players.get(p.getUniqueId());
+            boolean isTaker = freeKickTakerId != null && p.getUniqueId().equals(freeKickTakerId);
+            boolean onTakingTeam = sp != null && sp.getTeam() == freeKickTeam;
+            if (isTaker) {
+                p.sendTitle(
+                        Text.color(plugin.messages().raw("offside-title")),
+                        Text.color(freeKickTakerId != null
+                                ? plugin.messages().format("offside-subtitle-taker-named",
+                                "team", teamName(freeKickTeam))
+                                : plugin.messages().format("offside-subtitle-taker",
+                                "team", teamName(freeKickTeam))),
+                        5, 60, 15);
+            } else if (onTakingTeam) {
+                p.sendTitle(
+                        Text.color(plugin.messages().raw("offside-title")),
+                        Text.color(plugin.messages().raw("offside-subtitle-teammate-wait")),
+                        5, 50, 15);
+            } else {
+                p.sendTitle(
+                        Text.color(plugin.messages().raw("offside-title")),
+                        Text.color(freeKickTakerId != null
+                                ? plugin.messages().format("offside-subtitle-wait-named",
+                                "player", takerName, "team", teamName(freeKickTeam))
+                                : plugin.messages().format("offside-subtitle-wait",
+                                "team", teamName(freeKickTeam))),
+                        5, 50, 15);
+            }
+            p.playSound(p.getLocation(), Sound.ENTITY_VILLAGER_NO, 0.9f, 0.8f);
+        });
+    }
+
+    private String freeKickTakerName() {
+        if (freeKickTakerId == null) {
+            return teamName(freeKickTeam);
+        }
+        SoccerPlayer taker = players.get(freeKickTakerId);
+        return taker != null ? taker.getName() : teamName(freeKickTeam);
+    }
+
+    private void tickOffsideRestart() {
+        if (ball == null || freeKickTeam == null) {
+            return;
+        }
+        offsideRestartPulse++;
+        Location ballLoc = ball.getLocation();
+
+        if (settings.offsideTakerParticles && offsideRestartPulse % 4 == 0) {
+            OffsideRestartHelper.spawnBallMarker(ballLoc, freeKickTeam);
+        }
+
+        Location anchorSpot = freeKickSpot != null ? freeKickSpot : ballLoc;
+        Location takerSpot = pitchAxis != null
+                ? OffsideRestartHelper.computeTakerSpot(anchorSpot, pitchAxis, freeKickTeam)
+                : anchorSpot;
+
+        for (SoccerPlayer sp : players.values()) {
+            Player player = sp.getBukkitPlayer();
+            if (player == null || !player.isOnline()) {
+                continue;
+            }
+            if (freeKickTakerId != null && sp.getUuid().equals(freeKickTakerId)) {
+                if (settings.offsideTakerSnapBack
+                        && OffsideRestartHelper.horizontalDistance(player.getLocation(), takerSpot)
+                        > settings.offsideTakerWanderBlocks) {
+                    player.teleport(takerSpot);
+                    OffsideRestartHelper.applyTakerVisuals(player, settings);
+                }
+            } else if (sp.getTeam() != freeKickTeam) {
+                OffsideRestartHelper.restrainOpponent(player, ballLoc, settings);
+            } else {
+                player.setWalkSpeed(0.2f);
+            }
+        }
+
+        if (settings.actionBarHud && offsideRestartPulse % 4 == 0) {
+            updateOffsideActionBar();
+        }
+    }
+
+    private void updateOffsideActionBar() {
+        String takerName = freeKickTakerName();
+        forEachPlayer(p -> {
+            if (freeKickTakerId != null && p.getUniqueId().equals(freeKickTakerId)) {
+                ActionBar.send(p, plugin.messages().raw("offside-actionbar-taker"));
+            } else {
+                ActionBar.send(p, plugin.messages().format("offside-actionbar-wait",
+                        "player", takerName, "team", teamName(freeKickTeam)));
+            }
+        });
+    }
+
+    private void endFreeKick() {
+        clearFreeKickRestart();
+        freeKickTeam = null;
+        setState(resumeAfterFreeKick);
+        forEachPlayer(p -> p.sendTitle(Text.color(plugin.messages().raw("play-on")), "", 0, 20, 10));
+    }
+
+    private void performFreeKick(Player player, BallKickEvent.KickType type) {
+        if (state != GameState.OFFSIDE || freeKickTeam == null) {
+            return;
+        }
+        SoccerPlayer sp = players.get(player.getUniqueId());
+        if (sp == null || ball == null) {
+            return;
+        }
+        if (sp.getTeam() != freeKickTeam) {
+            plugin.messages().send(player, "offside-wrong-team",
+                    "team", teamName(freeKickTeam));
+            player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 0.8f, 1f);
+            return;
+        }
+        if (settings.offsideAutoTaker && settings.offsideTakerOnlyKick
+                && freeKickTakerId != null && !player.getUniqueId().equals(freeKickTakerId)) {
+            plugin.messages().send(player, "offside-wrong-taker", "player", freeKickTakerName());
+            player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 0.8f, 1f);
+            return;
+        }
+        if (!reachable(player, settings.kickReach * 1.4)) {
+            return;
+        }
+
+        BallKickEvent.KickType mechanicsType = type == BallKickEvent.KickType.SHOT
+                ? BallKickEvent.KickType.SHOT
+                : BallKickEvent.KickType.PASS;
+        Mechanics.Kick kick = Mechanics.compute(player, settings, mechanicsType, 0);
+
+        BallKickEvent event = new BallKickEvent(player, ball, mechanicsType, kick.impulse, kick.spin);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) {
+            return;
+        }
+
+        ball.recordTouch(player, sp.getTeam());
+        ball.applyImpulse(event.getImpulse(), event.getSpin());
+        ball.setFrozen(false);
+        sp.addTouch();
+        sp.addPass();
+
+        endFreeKick();
+
+        Location loc = ball.getLocation();
+        player.getWorld().playSound(loc, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1f, 1f);
+        player.getWorld().spawnParticle(Particle.CLOUD, loc, 6, 0.1, 0.1, 0.1, 0.05);
     }
 
     private void resetBallToCenter(String message) {
         ball.teleport(ballSpawnLocation());
         ball.clearTouchHistory();
+        clearOffsidePhase();
+        offsideExemptTouch = true;
         broadcast(message);
         forEachPlayer(p -> p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1f, 0.8f));
     }
@@ -969,12 +1391,20 @@ public final class Game {
             performThrowIn(player, BallKickEvent.KickType.SHOT);
             return;
         }
+        if (state == GameState.OFFSIDE) {
+            performFreeKick(player, BallKickEvent.KickType.SHOT);
+            return;
+        }
         kick(player, BallKickEvent.KickType.SHOT);
     }
 
     public void pass(Player player) {
         if (state == GameState.THROW_IN) {
             performThrowIn(player, BallKickEvent.KickType.THROW_IN);
+            return;
+        }
+        if (state == GameState.OFFSIDE) {
+            performFreeKick(player, BallKickEvent.KickType.PASS);
             return;
         }
         kick(player, BallKickEvent.KickType.PASS);
@@ -1038,6 +1468,7 @@ public final class Game {
             return;
         }
 
+        beginOffsidePhase(player, sp.getTeam(), type);
         ball.recordTouch(player, sp.getTeam());
         ball.applyImpulse(event.getImpulse(), event.getSpin());
         markReplayKickAnimation(player.getUniqueId(), type);
@@ -1099,7 +1530,7 @@ public final class Game {
     }
 
     public void setCharging(Player player, boolean charging) {
-        if (state == GameState.THROW_IN) {
+        if (state == GameState.THROW_IN || state == GameState.OFFSIDE) {
             return;
         }
         SoccerPlayer sp = players.get(player.getUniqueId());
@@ -1167,7 +1598,7 @@ public final class Game {
         }
         boolean halftime = state == GameState.HALFTIME;
         boolean liveClock = state == GameState.PLAYING || state == GameState.EXTRA_TIME
-                || state == GameState.THROW_IN || halftime;
+                || state == GameState.THROW_IN || state == GameState.OFFSIDE || halftime;
         if (!liveClock) {
             broadcastHud.setVisible(false);
             return;
@@ -1195,6 +1626,7 @@ public final class Game {
         switch (state) {
             case PLAYING:
             case THROW_IN:
+            case OFFSIDE:
                 return Math.min(1.0, (double) Math.max(0, halfDuration - secondsRemaining) / halfDuration);
             case EXTRA_TIME:
                 return Math.min(1.0, (double) Math.max(0, settings.goldenGoalDuration - secondsRemaining)
@@ -1216,6 +1648,7 @@ public final class Game {
         switch (state) {
             case PLAYING:
             case THROW_IN:
+            case OFFSIDE:
                 return (currentHalf - 1) * halfDuration
                         + Math.max(0, halfDuration - secondsRemaining);
             case EXTRA_TIME:
@@ -1229,6 +1662,9 @@ public final class Game {
     }
 
     private void updateHud() {
+        if (state == GameState.OFFSIDE && settings.actionBarHud) {
+            return;
+        }
         for (SoccerPlayer sp : players.values()) {
             Player p = sp.getBukkitPlayer();
             if (p == null) {
@@ -1270,6 +1706,7 @@ public final class Game {
             case PLAYING:
             case EXTRA_TIME:
             case THROW_IN:
+            case OFFSIDE:
                 return Text.formatTime(elapsedMatchSeconds())
                         + (settings.halves > 1
                         ? plugin.messages().format("half-suffix", "half", String.valueOf(currentHalf))
@@ -1379,6 +1816,14 @@ public final class Game {
         return matchTick;
     }
 
+    public OffsideChecker.PitchAxis getPitchAxis() {
+        return pitchAxis;
+    }
+
+    public TeamSide getBallLastTouchTeam() {
+        return ball != null ? ball.getLastTouchTeam() : null;
+    }
+
     public boolean isReplaying() {
         return goalReplay != null;
     }
@@ -1442,7 +1887,7 @@ public final class Game {
         return list;
     }
 
-    private int countTeam(TeamSide team) {
+    public int getTeamCount(TeamSide team) {
         int count = 0;
         for (SoccerPlayer sp : players.values()) {
             if (sp.getTeam() == team) {
@@ -1450,6 +1895,18 @@ public final class Game {
             }
         }
         return count;
+    }
+
+    public boolean isTeamFull(TeamSide team) {
+        return getTeamCount(team) >= settings.maxPlayersPerTeam;
+    }
+
+    public String getTeamDisplayName(TeamSide team) {
+        return teamName(team);
+    }
+
+    private int countTeam(TeamSide team) {
+        return getTeamCount(team);
     }
 
     private boolean hasEnoughPlayers() {

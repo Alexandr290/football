@@ -2,6 +2,7 @@ package com.ballgame.soccer.game;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
+import com.ballgame.soccer.gui.QuickJoinMenu;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -20,6 +21,9 @@ import java.util.UUID;
  * the single shared per-tick loop that advances all matches and ball physics.
  */
 public final class GameManager {
+
+    public record QuickJoinTarget(Arena arena, Game game) {
+    }
 
     private final SoccerPlugin plugin;
     private final Map<String, Game> gamesByArena = new HashMap<>();
@@ -64,11 +68,15 @@ public final class GameManager {
     }
 
     /**
-     * Join (or create and join) the match for a given arena.
+     * Join (or create and join) the match for a given arena with optional team choice.
      *
      * @return true if the player joined.
      */
     public boolean join(Player player, Arena arena) {
+        return join(player, arena, null);
+    }
+
+    public boolean join(Player player, Arena arena, TeamSide team) {
         if (gamesByPlayer.containsKey(player.getUniqueId())) {
             plugin.messages().send(player, "already-in-game");
             return false;
@@ -86,23 +94,49 @@ public final class GameManager {
             plugin.messages().send(player, "game-full");
             return false;
         }
+        if (team != null && game.isTeamFull(team)) {
+            plugin.messages().send(player, "quickjoin-team-full",
+                    "team", teamDisplayName(game, team));
+            return false;
+        }
         if (!plugin.settings().allowRejoin && game.getState() != GameState.WAITING
                 && game.getState() != GameState.COUNTDOWN) {
             plugin.messages().send(player, "match-already-started");
             return false;
         }
-        if (game.addPlayer(player)) {
+        if (game.addPlayer(player, team)) {
             gamesByPlayer.put(player.getUniqueId(), game);
             return true;
+        }
+        if (team != null) {
+            plugin.messages().send(player, "quickjoin-team-full",
+                    "team", teamDisplayName(game, team));
         }
         return false;
     }
 
     /**
      * Auto-pick the best available arena (most populated joinable match, else any
-     * empty playable arena) and join it.
+     * empty playable arena) and join it, optionally after a team-pick GUI.
      */
     public boolean quickJoin(Player player) {
+        return quickJoin(player, null);
+    }
+
+    public boolean quickJoin(Player player, TeamSide preferredTeam) {
+        QuickJoinTarget target = findQuickJoinTarget();
+        if (target == null) {
+            plugin.messages().send(player, "no-arenas-available");
+            return false;
+        }
+        if (preferredTeam == null && plugin.settings().quickjoinTeamPick) {
+            QuickJoinMenu.open(plugin, player, target.arena(), target.game());
+            return true;
+        }
+        return join(player, target.arena(), preferredTeam);
+    }
+
+    public QuickJoinTarget findQuickJoinTarget() {
         Game best = null;
         for (Game game : gamesByArena.values()) {
             if (game.isEnded() || game.isFull()) {
@@ -115,15 +149,14 @@ public final class GameManager {
             }
         }
         if (best != null) {
-            return join(player, best.getArena());
+            return new QuickJoinTarget(best.getArena(), best);
         }
         for (Arena arena : plugin.arenas().getArenas()) {
             if (arena.isPlayable() && !gamesByArena.containsKey(key(arena))) {
-                return join(player, arena);
+                return new QuickJoinTarget(arena, null);
             }
         }
-        plugin.messages().send(player, "no-arenas-available");
-        return false;
+        return null;
     }
 
     public boolean joinChampionship(Player player, Arena arena, TeamSide side,
@@ -216,6 +249,13 @@ public final class GameManager {
     /** Remove a player mapping without restoring (used on disconnect handling). */
     public void forget(Player player) {
         gamesByPlayer.remove(player.getUniqueId());
+    }
+
+    private String teamDisplayName(Game game, TeamSide team) {
+        if (game != null) {
+            return game.getTeamDisplayName(team);
+        }
+        return team == TeamSide.RED ? plugin.settings().redName : plugin.settings().blueName;
     }
 
     private String key(Arena arena) {

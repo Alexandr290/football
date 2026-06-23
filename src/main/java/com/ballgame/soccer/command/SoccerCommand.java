@@ -7,6 +7,7 @@ import com.ballgame.soccer.championship.ChampionshipType;
 import com.ballgame.soccer.championship.ChampTeam;
 import com.ballgame.soccer.crowd.CrowdPackMode;
 import com.ballgame.soccer.game.Game;
+import com.ballgame.soccer.game.TeamSide;
 import com.ballgame.soccer.stats.PlayerStats;
 import com.ballgame.soccer.util.Cuboid;
 import com.ballgame.soccer.util.Text;
@@ -59,14 +60,14 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         String sub = args[0].toLowerCase(Locale.ROOT);
         switch (sub) {
             case "join":        return join(sender, args);
-            case "quickjoin":   return quickJoin(sender);
+            case "quickjoin":   return quickJoin(sender, args);
             case "leave":       return leave(sender);
             case "list":        return list(sender);
             case "stats":       return stats(sender, args);
             case "top":         return top(sender, args);
             case "cup":
             case "championship": return openChampionshipGui(sender);
-            case "crowdpack":   return crowdPack(sender);
+            case "crowdpack":   return crowdPack(sender, args);
             case "help":        help(sender); return true;
 
             case "cupcreate":   return cupCreate(sender, args);
@@ -121,13 +122,29 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private boolean quickJoin(CommandSender sender) {
+    private boolean quickJoin(CommandSender sender, String[] args) {
         Player player = requirePlayer(sender, "soccer.play");
         if (player == null) {
             return true;
         }
-        plugin.games().quickJoin(player);
+        TeamSide team = null;
+        if (args.length >= 2) {
+            team = parseTeamSide(args[1]);
+            if (team == null) {
+                plugin.messages().sendRaw(player, "&cUsage: /soccer quickjoin [red|blue]");
+                return true;
+            }
+        }
+        plugin.games().quickJoin(player, team);
         return true;
+    }
+
+    private TeamSide parseTeamSide(String raw) {
+        return switch (raw.toLowerCase(Locale.ROOT)) {
+            case "red", "r" -> TeamSide.RED;
+            case "blue", "b" -> TeamSide.BLUE;
+            default -> null;
+        };
     }
 
     private boolean leave(CommandSender sender) {
@@ -407,11 +424,26 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private boolean crowdPack(CommandSender sender) {
+    private boolean crowdPack(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) {
             plugin.messages().sendRaw(sender, "&cPlayers only.");
             return true;
         }
+
+        if (args.length >= 2 && "accept".equalsIgnoreCase(args[1])) {
+            if (!plugin.settings().crowdRealSounds) {
+                plugin.messages().send(player, "crowd-pack-real-sounds-off");
+                return true;
+            }
+            if (!plugin.crowdPack().isReady()) {
+                plugin.messages().send(player, "crowd-pack-unavailable");
+                return true;
+            }
+            plugin.crowdPack().markAccepted(player);
+            plugin.messages().send(player, "crowd-pack-accepted");
+            return true;
+        }
+
         if (!plugin.crowdPack().isReady()) {
             plugin.messages().send(player, "crowd-pack-unavailable");
             return true;
@@ -422,6 +454,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
                 File install = plugin.crowdPack().installFile();
                 plugin.messages().send(player, "crowd-pack-manual-path", "path", install.getAbsolutePath());
                 plugin.messages().send(player, "crowd-pack-manual-steps");
+                plugin.messages().send(player, "crowd-pack-manual-accept-hint");
             }
             case DOWNLOAD, URL -> {
                 String url = plugin.crowdPack().sampleDownloadUrl(player);
@@ -612,7 +645,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
 
     private void help(CommandSender sender) {
         plugin.messages().sendRaw(sender, "&a&l=== AdvancedSoccer ===");
-        plugin.messages().sendRaw(sender, "&f/soccer quickjoin &7- join the best available match");
+        plugin.messages().sendRaw(sender, "&f/soccer quickjoin [red|blue] &7- join the best match (pick a team)");
         plugin.messages().sendRaw(sender, "&f/soccer join <arena> &7- join a specific arena");
         plugin.messages().sendRaw(sender, "&f/soccer leave &7- leave your match");
         plugin.messages().sendRaw(sender, "&f/soccer list &7- list arenas");
@@ -680,6 +713,9 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             String sub = args[0].toLowerCase(Locale.ROOT);
             if (sub.equals("top")) {
                 return filter(Arrays.asList("goals", "wins", "assists", "tackles", "saves"), args[1]);
+            }
+            if (sub.equals("quickjoin") && plugin.settings().quickjoinTeamPick) {
+                return filter(Arrays.asList("red", "blue"), args[1]);
             }
             if (sub.equals("cupcreate")) {
                 return filter(Arrays.asList("league", "knockout"), args[1]);

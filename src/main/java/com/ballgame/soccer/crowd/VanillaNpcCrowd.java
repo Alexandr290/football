@@ -148,7 +148,7 @@ public final class VanillaNpcCrowd {
         }
         Location at = pickStand(stands, player.getLocation());
         float scaled = (float) (volume * crowdVolumeScale);
-        player.playSound(at, sound, SoundCategory.VOICE, scaled, pitch);
+        player.playSound(at, sound, SoundCategory.NEUTRAL, scaled, pitch);
     }
 
     private static Location pickStand(List<Location> stands, Location near) {

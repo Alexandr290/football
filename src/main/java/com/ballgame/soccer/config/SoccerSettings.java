@@ -31,9 +31,33 @@ public final class SoccerSettings {
     public int goldenGoalDuration;
     public boolean penaltyShootout;
     public boolean allowRejoin;
+    public boolean quickjoinTeamPick;
     public int mercyRuleLead;
     public boolean throwInEnabled;
+    public boolean offsideEnabled;
+    public boolean offsideAutoTaker;
+    public boolean offsideTakerOnlyKick;
+    public boolean offsideTakerGlow;
+    public boolean offsideTakerParticles;
+    public boolean offsideTakerSnapBack;
+    public double offsideTakerWanderBlocks;
+    public boolean offsideRestrainOpponents;
+    public double offsideOpponentRestrainRadius;
+    public double offsideOpponentMinGap;
     public boolean broadcastHud;
+
+    // referee
+    public boolean refereeEnabled;
+    public String refereeName;
+    public java.util.List<String> refereeAssistantNames;
+    public double refereeFollowDistance;
+    public double refereeTrailOffset;
+    public double refereeWalkSpeed;
+    public double refereeSprintSpeed;
+    public double refereeSprintThreshold;
+    public boolean refereeWhistleEnabled;
+    public String refereeEntityType;
+    public String refereeSkinTexture;
 
     // ball
     public String ballDisplay;
@@ -156,9 +180,35 @@ public final class SoccerSettings {
         goldenGoalDuration = c.getInt("game.golden-goal-duration", 120);
         penaltyShootout = c.getBoolean("game.penalty-shootout", true);
         allowRejoin = c.getBoolean("game.allow-rejoin", true);
+        quickjoinTeamPick = c.getBoolean("game.quickjoin-team-pick", true);
         mercyRuleLead = c.getInt("game.mercy-rule-lead", 0);
         throwInEnabled = c.getBoolean("game.throw-in-enabled", true);
+        offsideEnabled = c.getBoolean("game.offside-enabled", true);
+        offsideAutoTaker = c.getBoolean("game.offside-auto-taker", true);
+        offsideTakerOnlyKick = c.getBoolean("game.offside-taker-only-kick", true);
+        offsideTakerGlow = c.getBoolean("game.offside-taker-glow", true);
+        offsideTakerParticles = c.getBoolean("game.offside-taker-particles", true);
+        offsideTakerSnapBack = c.getBoolean("game.offside-taker-snap-back", true);
+        offsideTakerWanderBlocks = c.getDouble("game.offside-taker-wander-blocks", 2.0);
+        offsideRestrainOpponents = c.getBoolean("game.offside-restrain-opponents", true);
+        offsideOpponentRestrainRadius = c.getDouble("game.offside-opponent-restrain-radius", 8.0);
+        offsideOpponentMinGap = c.getDouble("game.offside-opponent-min-gap", 3.0);
         broadcastHud = c.getBoolean("game.broadcast-hud", true);
+
+        refereeEnabled = c.getBoolean("referee.enabled", true);
+        refereeName = c.getString("referee.name", "Referee");
+        refereeAssistantNames = c.getStringList("referee.assistant-names");
+        if (refereeAssistantNames.isEmpty()) {
+            refereeAssistantNames = java.util.List.of("AR 1", "AR 2");
+        }
+        refereeFollowDistance = c.getDouble("referee.follow-distance", 5.5);
+        refereeTrailOffset = c.getDouble("referee.trail-offset", 0.045);
+        refereeWalkSpeed = c.getDouble("referee.walk-speed", 0.16);
+        refereeSprintSpeed = c.getDouble("referee.sprint-speed", 0.30);
+        refereeSprintThreshold = c.getDouble("referee.sprint-threshold", 4.0);
+        refereeWhistleEnabled = c.getBoolean("referee.whistle-enabled", true);
+        refereeEntityType = c.getString("referee.entity-type", "auto");
+        refereeSkinTexture = c.getString("referee.skin-texture", "");
 
         replayEnabled = c.getBoolean("replay.enabled", true);
         replayBufferSeconds = c.getInt("replay.buffer-seconds", 15);
@@ -173,7 +223,7 @@ public final class SoccerSettings {
 
         crowdEnabled = c.getBoolean("crowd.enabled", true);
         crowdVolume = c.getDouble("crowd.volume", 0.85);
-        crowdAmbienceInterval = c.getInt("crowd.ambience-interval-ticks", 14);
+        crowdAmbienceInterval = c.getInt("crowd.ambience-interval-ticks", 8);
         crowdDangerRadius = c.getDouble("crowd.danger-radius", 18.0);
         crowdDangerMinSpeed = c.getDouble("crowd.danger-min-speed", 0.75);
         crowdGoalCelebration = c.getBoolean("crowd.goal-celebration", true);

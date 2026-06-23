@@ -14,6 +14,8 @@ public enum GameState {
     PLAYING("In Play"),
     /** Ball out on the touchline — one team restarts from the sideline. */
     THROW_IN("Throw-In"),
+    /** Offside — defending team restarts with an indirect free kick. */
+    OFFSIDE("Offside"),
     /** Short break between halves. */
     HALFTIME("Half Time"),
     /** Golden-goal extra time. */
@@ -39,8 +41,16 @@ public enum GameState {
         return this == PLAYING || this == EXTRA_TIME;
     }
 
+    /** Stadium crowd audio runs through these phases (kickoff → full time). */
+    public boolean hasStadiumCrowd() {
+        return switch (this) {
+            case KICKOFF, PLAYING, THROW_IN, OFFSIDE, HALFTIME, EXTRA_TIME, PENALTIES, REPLAY -> true;
+            default -> false;
+        };
+    }
+
     /** Player input (kick / pass) is accepted in this state. */
     public boolean acceptsPlayerKicks() {
-        return this == PLAYING || this == EXTRA_TIME || this == THROW_IN;
+        return this == PLAYING || this == EXTRA_TIME || this == THROW_IN || this == OFFSIDE;
     }
 }
