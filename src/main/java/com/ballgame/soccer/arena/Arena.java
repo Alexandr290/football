@@ -5,6 +5,7 @@ import com.ballgame.soccer.util.Cuboid;
 import com.ballgame.soccer.util.Locations;
 import org.bukkit.Location;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.util.Vector;
 
 /**
  * A fully-described soccer pitch. An arena is "setup-complete" once it has a
@@ -346,6 +347,34 @@ public final class Arena {
 
         double y = Math.max(field.getMinY() + 0.6, exitLoc.getY());
         return new Location(field.getWorld(), x, y, z);
+    }
+
+    /**
+     * Resolves the throw-in spot plus the inward (pitch) direction for facing and
+     * touchline confinement.
+     */
+    public ThrowInGeometry computeThrowInGeometry(Location exitLoc) {
+        Location spot = computeThrowInSpot(exitLoc);
+        if (field == null || spot == null) {
+            return new ThrowInGeometry(spot, new Vector(0, 0, 1), false, true);
+        }
+
+        double inset = 0.35;
+        double x = spot.getX();
+        double z = spot.getZ();
+        boolean touchlineOnX = Math.abs(x - field.getMinX()) < inset + 0.05
+                || Math.abs(x - field.getMaxX()) < inset + 0.05;
+
+        if (touchlineOnX) {
+            if (Math.abs(x - field.getMinX()) < Math.abs(x - field.getMaxX())) {
+                return new ThrowInGeometry(spot, new Vector(1, 0, 0), true, true);
+            }
+            return new ThrowInGeometry(spot, new Vector(-1, 0, 0), true, false);
+        }
+        if (Math.abs(z - field.getMinZ()) < Math.abs(z - field.getMaxZ())) {
+            return new ThrowInGeometry(spot, new Vector(0, 0, 1), false, true);
+        }
+        return new ThrowInGeometry(spot, new Vector(0, 0, -1), false, false);
     }
 
     public Location getTeamSpawn(TeamSide side) {

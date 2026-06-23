@@ -431,7 +431,10 @@ public final class Ball {
     }
 
     public void recordTouch(Player player, TeamSide team) {
-        UUID id = player.getUniqueId();
+        recordTouch(player.getUniqueId(), team);
+    }
+
+    public void recordTouch(UUID id, TeamSide team) {
         if (lastTouchId != null && !lastTouchId.equals(id)) {
             prevTouchId = lastTouchId;
             prevTouchTeam = lastTouchTeam;

@@ -2,7 +2,7 @@ package com.ballgame.soccer.game;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
-import com.ballgame.soccer.gui.QuickJoinMenu;
+import com.ballgame.soccer.gui.QuickJoinModeMenu;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -77,18 +77,40 @@ public final class GameManager {
     }
 
     public boolean join(Player player, Arena arena, TeamSide team) {
-        if (gamesByPlayer.containsKey(player.getUniqueId())) {
-            plugin.messages().send(player, "already-in-game");
-            return false;
+        if (plugin.network().redirectJoin(player, arena.getName(), team)) {
+            return true;
+        }
+        Game existingPlayerGame = gamesByPlayer.get(player.getUniqueId());
+        if (existingPlayerGame != null) {
+            if (existingPlayerGame.isEnded()) {
+                existingPlayerGame.cancelScheduledCleanup();
+                existingPlayerGame.releaseAllPlayersQuietly();
+                gamesByPlayer.remove(player.getUniqueId());
+            } else {
+                plugin.messages().send(player, "already-in-game");
+                return false;
+            }
         }
         if (!arena.isPlayable()) {
             plugin.messages().send(player, "arena-not-ready");
             return false;
         }
         Game game = gamesByArena.get(key(arena));
-        if (game == null || game.isEnded()) {
+        if (game != null && game.isEnded()) {
+            Game ended = game;
+            ended.cancelScheduledCleanup();
+            ended.releaseAllPlayersQuietly();
+            ended.cleanupResourcesOnly();
+            gamesByArena.values().removeIf(g -> g == ended);
+            gamesByPlayer.values().removeIf(g -> g == ended);
+            game = null;
+        }
+        if (game == null) {
             game = new Game(plugin, arena);
             gamesByArena.put(key(arena), game);
+        } else if (game.isSoloMatch()) {
+            plugin.messages().send(player, "join-solo-only");
+            return false;
         }
         if (game.isFull()) {
             plugin.messages().send(player, "game-full");
@@ -106,6 +128,7 @@ public final class GameManager {
         }
         if (game.addPlayer(player, team)) {
             gamesByPlayer.put(player.getUniqueId(), game);
+            plugin.network().clearLobbyReturn(player);
             return true;
         }
         if (team != null) {
@@ -124,37 +147,135 @@ public final class GameManager {
     }
 
     public boolean quickJoin(Player player, TeamSide preferredTeam) {
-        QuickJoinTarget target = findQuickJoinTarget();
-        if (target == null) {
-            plugin.messages().send(player, "no-arenas-available");
-            return false;
-        }
-        if (preferredTeam == null && plugin.settings().quickjoinTeamPick) {
-            QuickJoinMenu.open(plugin, player, target.arena(), target.game());
+        if (plugin.network().redirectQuickJoin(player, preferredTeam)) {
             return true;
         }
-        return join(player, target.arena(), preferredTeam);
+        if (preferredTeam != null) {
+            QuickJoinTarget target = findQuickJoinTarget(QuickJoinMode.TEAMS);
+            if (target == null) {
+                plugin.messages().send(player, "no-arenas-available");
+                return false;
+            }
+            return join(player, target.arena(), preferredTeam);
+        }
+        QuickJoinModeMenu.open(plugin, player);
+        return true;
+    }
+
+    public boolean joinSolo(Player player, Arena arena, TeamSide team, int botCount) {
+        if (!plugin.settings().botsEnabled) {
+            return join(player, arena, team);
+        }
+        Game existingPlayerGame = gamesByPlayer.get(player.getUniqueId());
+        if (existingPlayerGame != null) {
+            if (existingPlayerGame.isEnded()) {
+                existingPlayerGame.cancelScheduledCleanup();
+                existingPlayerGame.releaseAllPlayersQuietly();
+                gamesByPlayer.remove(player.getUniqueId());
+            } else {
+                plugin.messages().send(player, "already-in-game");
+                return false;
+            }
+        }
+        if (!arena.isPlayable()) {
+            plugin.messages().send(player, "arena-not-ready");
+            return false;
+        }
+        int opponents = Math.min(botCount, plugin.settings().botMaxSoloCount);
+        opponents = Math.min(opponents, plugin.settings().maxPlayersPerTeam);
+        TeamSide botTeam = team != null ? team.opposite() : TeamSide.BLUE;
+
+        Game game = gamesByArena.get(key(arena));
+        if (game != null && !game.isEnded() && !game.isSoloMatch()) {
+            plugin.messages().send(player, "match-already-started");
+            return false;
+        }
+        if (game != null && game.isEnded()) {
+            Game ended = game;
+            ended.cancelScheduledCleanup();
+            ended.releaseAllPlayersQuietly();
+            ended.cleanupResourcesOnly();
+            gamesByArena.values().removeIf(g -> g == ended);
+            gamesByPlayer.values().removeIf(g -> g == ended);
+            game = null;
+        }
+        if (game == null) {
+            game = new Game(plugin, arena);
+            game.setSoloMatch(true);
+            gamesByArena.put(key(arena), game);
+        }
+        if (game.isFull() || (team != null && game.isTeamFull(team))) {
+            plugin.messages().send(player, "game-full");
+            return false;
+        }
+        if (!game.addPlayer(player, team)) {
+            return false;
+        }
+        gamesByPlayer.put(player.getUniqueId(), game);
+        plugin.network().clearLobbyReturn(player);
+
+        int currentOpponentBots = 0;
+        for (var bot : game.getBots()) {
+            if (bot.getTeam() == botTeam) {
+                currentOpponentBots++;
+            }
+        }
+        for (int i = currentOpponentBots; i < opponents; i++) {
+            if (game.isTeamFull(botTeam)) {
+                break;
+            }
+            game.addBot(botTeam, i);
+        }
+        plugin.messages().send(player, "solo-match-ready",
+                "count", String.valueOf(opponents), "team", game.getTeamDisplayName(botTeam));
+        return true;
     }
 
     public QuickJoinTarget findQuickJoinTarget() {
-        Game best = null;
-        for (Game game : gamesByArena.values()) {
-            if (game.isEnded() || game.isFull()) {
-                continue;
-            }
-            if (game.getState() == GameState.WAITING || game.getState() == GameState.COUNTDOWN) {
-                if (best == null || game.playerCount() > best.playerCount()) {
-                    best = game;
+        return findQuickJoinTarget(QuickJoinMode.TEAMS);
+    }
+
+    public QuickJoinTarget findQuickJoinTarget(QuickJoinMode mode) {
+        if (mode == QuickJoinMode.TEAMS) {
+            Game best = null;
+            for (Game game : gamesByArena.values()) {
+                if (game.isEnded() || game.isFull() || game.isSoloMatch()) {
+                    continue;
+                }
+                if (game.getState() == GameState.WAITING || game.getState() == GameState.COUNTDOWN) {
+                    if (best == null || game.playerCount() > best.playerCount()) {
+                        best = game;
+                    }
                 }
             }
-        }
-        if (best != null) {
-            return new QuickJoinTarget(best.getArena(), best);
-        }
-        for (Arena arena : plugin.arenas().getArenas()) {
-            if (arena.isPlayable() && !gamesByArena.containsKey(key(arena))) {
-                return new QuickJoinTarget(arena, null);
+            if (best != null) {
+                return new QuickJoinTarget(best.getArena(), best);
             }
+            for (Arena arena : plugin.arenas().getArenas()) {
+                Game existing = gamesByArena.get(key(arena));
+                if (arena.isPlayable() && (existing == null || existing.isEnded())) {
+                    return new QuickJoinTarget(arena, null);
+                }
+            }
+            return null;
+        }
+
+        for (Arena arena : plugin.arenas().getArenas()) {
+            if (!arena.isPlayable()) {
+                continue;
+            }
+            Game existing = gamesByArena.get(key(arena));
+            if (existing != null && !existing.isEnded()) {
+                if (!existing.isSoloMatch()) {
+                    continue;
+                }
+                if ((existing.getState() == GameState.WAITING || existing.getState() == GameState.COUNTDOWN)
+                        && !existing.isFull()) {
+                    return new QuickJoinTarget(arena, existing);
+                }
+                continue;
+            }
+            return new QuickJoinTarget(arena, null);
         }
         return null;
     }
@@ -217,10 +338,12 @@ public final class GameManager {
         }
         game.removePlayer(player, true);
         plugin.messages().send(player, "left-game");
+        plugin.network().returnToLobbyAfterLeave(player);
     }
 
     /** Called by a {@link Game} when it finishes. */
     public void endGame(Game game) {
+        game.cancelScheduledCleanup();
         game.cleanup();
         gamesByArena.values().removeIf(g -> g == game);
         gamesByPlayer.values().removeIf(g -> g == game);

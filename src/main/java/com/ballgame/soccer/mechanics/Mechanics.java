@@ -32,7 +32,11 @@ public final class Mechanics {
      * @param chargeFraction 0..1 charge level for shots/passes
      */
     public static Kick compute(Player player, SoccerSettings s, KickType type, double chargeFraction) {
-        Vector look = player.getEyeLocation().getDirection().normalize();
+        return compute(new PlayerKickActor(player), s, type, chargeFraction);
+    }
+
+    public static Kick compute(KickActor actor, SoccerSettings s, KickType type, double chargeFraction) {
+        Vector look = actor.getEyeLocation().getDirection().normalize();
         Vector flatLook = new Vector(look.getX(), 0, look.getZ());
         if (flatLook.lengthSquared() < 1.0e-6) {
             flatLook = new Vector(0, 0, 1);
@@ -88,7 +92,7 @@ public final class Mechanics {
         impulse.setY(vertical);
 
         // Sprinting adds the player's forward momentum to the strike.
-        if (player.isSprinting()) {
+        if (actor.isSprinting()) {
             impulse.add(flatLook.clone().multiply(s.sprintBonus));
         }
 
@@ -97,7 +101,7 @@ public final class Mechanics {
         if (type == KickType.SHOT || type == KickType.PASS || type == KickType.THROW_IN) {
             // Side-spin: striking across the ball while moving sideways relative
             // to your aim bends the ball's flight left or right.
-            Vector move = player.getVelocity();
+            Vector move = actor.getVelocity();
             Vector flatMove = new Vector(move.getX(), 0, move.getZ());
             if (flatMove.lengthSquared() > 1.0e-4) {
                 double side = flatLook.clone().crossProduct(flatMove).getY();
@@ -125,13 +129,17 @@ public final class Mechanics {
      * the player so it stays at their feet while running.
      */
     public static Vector dribbleNudge(Player player, SoccerSettings s) {
-        Vector look = player.getLocation().getDirection();
+        return dribbleNudge(new PlayerKickActor(player), s);
+    }
+
+    public static Vector dribbleNudge(KickActor actor, SoccerSettings s) {
+        Vector look = actor.getLocation().getDirection();
         Vector flat = new Vector(look.getX(), 0, look.getZ());
         if (flat.lengthSquared() < 1.0e-6) {
             return new Vector(0, 0, 0);
         }
         flat.normalize();
-        double power = s.lightTouchPower * (player.isSprinting() ? 0.85 : 0.6);
+        double power = s.lightTouchPower * (actor.isSprinting() ? 0.85 : 0.6);
         return flat.multiply(power);
     }
 }

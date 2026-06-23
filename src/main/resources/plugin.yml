@@ -5,7 +5,10 @@ api-version: '1.20'
 author: BallGame
 description: A comprehensive, physics-driven soccer (football) minigame plugin.
 website: https://github.com/ballgame/AdvancedSoccer
-softdepend: [PlaceholderAPI]
+softdepend: [PlaceholderAPI, Citizens]
+
+channels:
+  - advancedsoccer:join
 
 commands:
   soccer:

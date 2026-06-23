@@ -5,6 +5,7 @@ import com.ballgame.soccer.arena.Arena;
 import com.ballgame.soccer.config.Messages;
 import com.ballgame.soccer.config.SoccerSettings;
 import com.ballgame.soccer.game.Game;
+import com.ballgame.soccer.game.QuickJoinMode;
 import com.ballgame.soccer.game.TeamSide;
 import com.ballgame.soccer.util.Items;
 import org.bukkit.Material;
@@ -18,15 +19,25 @@ public final class QuickJoinMenu extends AbstractMenu {
 
     private final Arena arena;
     private final Game game;
+    private final QuickJoinMode mode;
+    private final int botCount;
 
-    private QuickJoinMenu(SoccerPlugin plugin, Player viewer, Arena arena, Game game) {
+    private QuickJoinMenu(SoccerPlugin plugin, Player viewer, Arena arena, Game game,
+                          QuickJoinMode mode, int botCount) {
         super(plugin, viewer, plugin.messages().raw("quickjoin-gui-title"), 3);
         this.arena = arena;
         this.game = game;
+        this.mode = mode;
+        this.botCount = botCount;
     }
 
     public static void open(SoccerPlugin plugin, Player player, Arena arena, Game game) {
-        new QuickJoinMenu(plugin, player, arena, game).open();
+        open(plugin, player, arena, game, QuickJoinMode.TEAMS, 0);
+    }
+
+    public static void open(SoccerPlugin plugin, Player player, Arena arena, Game game,
+                            QuickJoinMode mode, int botCount) {
+        new QuickJoinMenu(plugin, player, arena, game, mode, botCount).open();
     }
 
     @Override
@@ -43,12 +54,21 @@ public final class QuickJoinMenu extends AbstractMenu {
                 msg.raw("quickjoin-gui-header"),
                 msg.format("quickjoin-gui-arena", "arena", arena.getName()),
                 msg.format("quickjoin-gui-status", "state", state),
-                msg.format("quickjoin-gui-players", "count", String.valueOf(redCount + blueCount))));
+                msg.format("quickjoin-gui-players", "count", String.valueOf(redCount + blueCount)),
+                mode == QuickJoinMode.SOLO
+                        ? msg.format("quickjoin-gui-solo-bots", "count", String.valueOf(botCount))
+                        : msg.raw("quickjoin-gui-teams-mode")));
 
         renderTeamSlot(11, TeamSide.RED, settings.redName, settings.redChatColor,
                 redCount, settings.maxPlayersPerTeam);
         renderTeamSlot(15, TeamSide.BLUE, settings.blueName, settings.blueChatColor,
                 blueCount, settings.maxPlayersPerTeam);
+
+        if (mode == QuickJoinMode.SOLO) {
+            backButton(22, () -> QuickJoinSoloMenu.open(plugin, viewer, botCount));
+        } else {
+            backButton(22, () -> QuickJoinModeMenu.open(plugin, viewer));
+        }
     }
 
     private void renderTeamSlot(int slot, TeamSide side, String teamName, String chatColor,
@@ -76,7 +96,10 @@ public final class QuickJoinMenu extends AbstractMenu {
             clickSound();
             return;
         }
-        if (plugin.games().join(viewer, arena, side)) {
+        boolean joined = mode == QuickJoinMode.SOLO
+                ? plugin.games().joinSolo(viewer, arena, side, botCount)
+                : plugin.games().join(viewer, arena, side);
+        if (joined) {
             viewer.closeInventory();
         }
     }

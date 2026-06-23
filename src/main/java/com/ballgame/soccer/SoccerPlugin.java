@@ -9,6 +9,8 @@ import com.ballgame.soccer.championship.ChampionshipManager;
 import com.ballgame.soccer.championship.ChampionshipType;
 import com.ballgame.soccer.crowd.CrowdResourcePack;
 import com.ballgame.soccer.game.GameManager;
+import com.ballgame.soccer.listener.NetworkPlayerListener;
+import com.ballgame.soccer.network.NetworkManager;
 import com.ballgame.soccer.listener.BallProtectionListener;
 import com.ballgame.soccer.listener.ChampionshipGuiListener;
 import com.ballgame.soccer.listener.ChampionshipRenameListener;
@@ -33,6 +35,7 @@ public final class SoccerPlugin extends JavaPlugin {
     private StatsManager statsManager;
     private ChampionshipManager championshipManager;
     private CrowdResourcePack crowdPack;
+    private NetworkManager networkManager;
     private BukkitTask autoSaveTask;
 
     @Override
@@ -43,6 +46,10 @@ public final class SoccerPlugin extends JavaPlugin {
         this.messages = new Messages(this);
         this.settings = new SoccerSettings(this);
         reloadAll();
+
+        this.networkManager = new NetworkManager(this);
+        this.networkManager.reload(settings);
+        this.networkManager.start();
 
         this.arenaManager = new ArenaManager(this);
         this.arenaManager.load();
@@ -86,6 +93,9 @@ public final class SoccerPlugin extends JavaPlugin {
         if (crowdPack != null) {
             crowdPack.stop();
         }
+        if (networkManager != null) {
+            networkManager.stop();
+        }
         getLogger().info("AdvancedSoccer disabled.");
     }
 
@@ -94,6 +104,9 @@ public final class SoccerPlugin extends JavaPlugin {
         reloadConfig();
         messages.reload();
         settings.reload();
+        if (networkManager != null) {
+            networkManager.reload(settings);
+        }
         if (crowdPack != null) {
             crowdPack.stop();
             crowdPack.start();
@@ -104,6 +117,7 @@ public final class SoccerPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new PlayerActionListener(this), this);
         getServer().getPluginManager().registerEvents(new BallProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
+        getServer().getPluginManager().registerEvents(new NetworkPlayerListener(this), this);
         getServer().getPluginManager().registerEvents(new ChampionshipGuiListener(), this);
         getServer().getPluginManager().registerEvents(new ChampionshipRenameListener(this), this);
         getServer().getPluginManager().registerEvents(new CrowdPackListener(this), this);
@@ -154,5 +168,9 @@ public final class SoccerPlugin extends JavaPlugin {
 
     public CrowdResourcePack crowdPack() {
         return crowdPack;
+    }
+
+    public NetworkManager network() {
+        return networkManager;
     }
 }

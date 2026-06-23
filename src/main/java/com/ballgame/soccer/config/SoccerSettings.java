@@ -2,6 +2,7 @@ package com.ballgame.soccer.config;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.crowd.CrowdPackMode;
+import com.ballgame.soccer.network.NetworkRole;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.List;
@@ -32,8 +33,23 @@ public final class SoccerSettings {
     public boolean penaltyShootout;
     public boolean allowRejoin;
     public boolean quickjoinTeamPick;
+    public boolean botsEnabled;
+    public int botMinSoloCount;
+    public int botMaxSoloCount;
+    public int botDefaultSoloCount;
+    public double botWalkSpeed;
+    public double botSprintSpeed;
+    public java.util.List<String> botNames;
+    public String botVisualType;
+    public java.util.List<String> botSkinNames;
     public int mercyRuleLead;
     public boolean throwInEnabled;
+    public boolean throwInAutoTaker;
+    public boolean throwInTakerOnlyKick;
+    public boolean throwInTakerGlow;
+    public boolean throwInTakerParticles;
+    public boolean throwInTakerSnapBack;
+    public double throwInTakerWanderBlocks;
     public boolean offsideEnabled;
     public boolean offsideAutoTaker;
     public boolean offsideTakerOnlyKick;
@@ -45,6 +61,15 @@ public final class SoccerSettings {
     public double offsideOpponentRestrainRadius;
     public double offsideOpponentMinGap;
     public boolean broadcastHud;
+
+    // network (BungeeCord)
+    public boolean networkEnabled;
+    public NetworkRole networkRole;
+    public String networkGameServer;
+    public String networkLobbyServer;
+    public int networkPendingJoinTimeoutSeconds;
+    public boolean networkReturnToLobbyOnLeave;
+    public boolean networkReturnToLobbyOnMatchEnd;
 
     // referee
     public boolean refereeEnabled;
@@ -181,8 +206,32 @@ public final class SoccerSettings {
         penaltyShootout = c.getBoolean("game.penalty-shootout", true);
         allowRejoin = c.getBoolean("game.allow-rejoin", true);
         quickjoinTeamPick = c.getBoolean("game.quickjoin-team-pick", true);
+        botsEnabled = c.getBoolean("bots.enabled", true);
+        botMinSoloCount = Math.max(1, c.getInt("bots.min-solo-count", 1));
+        botMaxSoloCount = Math.max(botMinSoloCount, c.getInt("bots.max-solo-count", 5));
+        botDefaultSoloCount = Math.max(botMinSoloCount,
+                Math.min(botMaxSoloCount, c.getInt("bots.default-solo-count", 3)));
+        botWalkSpeed = c.getDouble("bots.walk-speed", 0.216);
+        botSprintSpeed = c.getDouble("bots.sprint-speed", 0.281);
+        botNames = c.getStringList("bots.names");
+        if (botNames.isEmpty()) {
+            botNames = java.util.List.of(
+                    "Striker", "Midfielder", "Winger", "Playmaker", "Defender");
+        }
+        botVisualType = c.getString("bots.visual", "auto");
+        botSkinNames = c.getStringList("bots.skin-names");
+        if (botSkinNames.isEmpty()) {
+            botSkinNames = java.util.List.of(
+                    "Notch", "jeb_", "Dinnerbone", "Grumm", "MHF_Steve");
+        }
         mercyRuleLead = c.getInt("game.mercy-rule-lead", 0);
         throwInEnabled = c.getBoolean("game.throw-in-enabled", true);
+        throwInAutoTaker = c.getBoolean("game.throw-in-auto-taker", true);
+        throwInTakerOnlyKick = c.getBoolean("game.throw-in-taker-only-kick", true);
+        throwInTakerGlow = c.getBoolean("game.throw-in-taker-glow", true);
+        throwInTakerParticles = c.getBoolean("game.throw-in-taker-particles", true);
+        throwInTakerSnapBack = c.getBoolean("game.throw-in-taker-snap-back", true);
+        throwInTakerWanderBlocks = c.getDouble("game.throw-in-taker-wander-blocks", 2.0);
         offsideEnabled = c.getBoolean("game.offside-enabled", true);
         offsideAutoTaker = c.getBoolean("game.offside-auto-taker", true);
         offsideTakerOnlyKick = c.getBoolean("game.offside-taker-only-kick", true);
@@ -194,6 +243,14 @@ public final class SoccerSettings {
         offsideOpponentRestrainRadius = c.getDouble("game.offside-opponent-restrain-radius", 8.0);
         offsideOpponentMinGap = c.getDouble("game.offside-opponent-min-gap", 3.0);
         broadcastHud = c.getBoolean("game.broadcast-hud", true);
+
+        networkEnabled = c.getBoolean("network.enabled", false);
+        networkRole = NetworkRole.fromConfig(c.getString("network.role", "standalone"));
+        networkGameServer = c.getString("network.game-server", "soccer");
+        networkLobbyServer = c.getString("network.lobby-server", "lobby");
+        networkPendingJoinTimeoutSeconds = Math.max(10, c.getInt("network.pending-join-timeout-seconds", 45));
+        networkReturnToLobbyOnLeave = c.getBoolean("network.return-to-lobby-on-leave", true);
+        networkReturnToLobbyOnMatchEnd = c.getBoolean("network.return-to-lobby-on-match-end", true);
 
         refereeEnabled = c.getBoolean("referee.enabled", true);
         refereeName = c.getString("referee.name", "Referee");

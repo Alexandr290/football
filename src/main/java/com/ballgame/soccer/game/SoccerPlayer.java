@@ -35,7 +35,22 @@ public final class SoccerPlayer {
         this.name = player.getName();
         this.team = team;
         this.stamina = startingStamina;
+        this.bot = false;
     }
+
+    public static SoccerPlayer createBot(UUID uuid, String name, TeamSide team, double startingStamina) {
+        return new SoccerPlayer(uuid, name, team, startingStamina, true);
+    }
+
+    private SoccerPlayer(UUID uuid, String name, TeamSide team, double startingStamina, boolean bot) {
+        this.uuid = uuid;
+        this.name = name;
+        this.team = team;
+        this.stamina = startingStamina;
+        this.bot = bot;
+    }
+
+    private final boolean bot;
 
     public Player getBukkitPlayer() {
         return Bukkit.getPlayer(uuid);
@@ -44,6 +59,10 @@ public final class SoccerPlayer {
     public boolean isOnline() {
         Player p = getBukkitPlayer();
         return p != null && p.isOnline();
+    }
+
+    public boolean isBot() {
+        return bot;
     }
 
     public UUID getUuid() {

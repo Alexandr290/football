@@ -5,7 +5,7 @@
 # the game without touching code. Colors use '&' codes (and hex &#RRGGBB).
 # =====================================================================
 
-config-version: 15
+config-version: 20
 
 settings:
   # Chat prefix (overrides the language file prefix when set).
@@ -46,6 +46,13 @@ game:
   # When true, the ball crossing a touchline (sideline) triggers a throw-in restart.
   # When false, the ball is reset to center instead.
   throw-in-enabled: true
+  # Nearest throw-in team player is teleported to the ball and must take the throw-in.
+  throw-in-auto-taker: true
+  throw-in-taker-only-kick: true
+  throw-in-taker-glow: true
+  throw-in-taker-particles: true
+  throw-in-taker-snap-back: true
+  throw-in-taker-wander-blocks: 2.0
   # When true, offside is enforced (IFAB rules): judged when the ball is played,
   # penalised when an offside attacker becomes involved. Indirect free kick restart.
   offside-enabled: true
@@ -66,6 +73,52 @@ game:
   # When true, /soccer quickjoin opens a menu to pick Red or Blue before joining.
   # Use /soccer quickjoin red|blue to skip the menu and join a side directly.
   quickjoin-team-pick: true
+
+# ---------------------------------------------------------------------
+# BungeeCord network — lobby sends players to the game backend for matches.
+# Requires bungeecord: true in spigot.yml on every backend.
+# ---------------------------------------------------------------------
+network:
+  enabled: false
+  # standalone = normal single-server behaviour
+  # lobby      = /soccer quickjoin and /soccer join send players to game-server
+  # game       = hosts matches and can send players back to lobby-server
+  role: standalone
+  # BungeeCord server names from the proxy config.yml (NOT IP addresses).
+  game-server: soccer
+  lobby-server: lobby
+  pending-join-timeout-seconds: 45
+  # Game backend only — send players back to lobby-server when they leave or a match ends.
+  return-to-lobby-on-leave: true
+  return-to-lobby-on-match-end: true
+
+# ---------------------------------------------------------------------
+# Match bots — solo practice vs AI opponents.
+# ---------------------------------------------------------------------
+bots:
+  enabled: true
+  # auto = Citizens player NPC if Citizens is installed, else Mannequin on 1.21.4+, else armor stand
+  # citizens | mannequin | armor_stand
+  visual: auto
+  min-solo-count: 1
+  max-solo-count: 5
+  default-solo-count: 3
+  # Blocks per tick — matches vanilla walk (~0.216) and sprint (~0.281) at 20 TPS.
+  walk-speed: 0.216
+  sprint-speed: 0.281
+  names:
+    - "Striker"
+    - "Midfielder"
+    - "Winger"
+    - "Playmaker"
+    - "Defender"
+  # Minecraft profile names used for Citizens NPC skins (rotated by bot index).
+  skin-names:
+    - "Notch"
+    - "jeb_"
+    - "Dinnerbone"
+    - "Grumm"
+    - "MHF_Steve"
 
 # ---------------------------------------------------------------------
 # Match referee — center official + two assistant referees (linesmen).

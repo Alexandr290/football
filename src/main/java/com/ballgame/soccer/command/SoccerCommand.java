@@ -115,6 +115,9 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         }
         Arena arena = plugin.arenas().get(args[1]);
         if (arena == null) {
+            if (plugin.network().redirectJoin(player, args[1], null)) {
+                return true;
+            }
             plugin.messages().send(player, "arena-not-found", "arena", args[1]);
             return true;
         }
@@ -645,7 +648,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
 
     private void help(CommandSender sender) {
         plugin.messages().sendRaw(sender, "&a&l=== AdvancedSoccer ===");
-        plugin.messages().sendRaw(sender, "&f/soccer quickjoin [red|blue] &7- join the best match (pick a team)");
+        plugin.messages().sendRaw(sender, "&f/soccer quickjoin [red|blue] &7- solo or teams matchmaking");
         plugin.messages().sendRaw(sender, "&f/soccer join <arena> &7- join a specific arena");
         plugin.messages().sendRaw(sender, "&f/soccer leave &7- leave your match");
         plugin.messages().sendRaw(sender, "&f/soccer list &7- list arenas");
