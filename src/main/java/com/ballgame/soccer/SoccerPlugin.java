@@ -1,6 +1,11 @@
 package com.ballgame.soccer;
 
 import com.ballgame.soccer.arena.ArenaManager;
+import com.ballgame.soccer.ball.BallOrphanCleanup;
+import com.ballgame.soccer.bot.BotNpcDiagnostics;
+import com.ballgame.soccer.bot.CitizensSupport;
+import com.ballgame.soccer.replay.MannequinSupport;
+import com.ballgame.soccer.command.LeaderboardCommand;
 import com.ballgame.soccer.command.SoccerCommand;
 import com.ballgame.soccer.config.ConfigUpdater;
 import com.ballgame.soccer.config.Messages;
@@ -17,7 +22,9 @@ import com.ballgame.soccer.listener.ChampionshipRenameListener;
 import com.ballgame.soccer.listener.CrowdPackListener;
 import com.ballgame.soccer.listener.PlayerActionListener;
 import com.ballgame.soccer.listener.PlayerConnectionListener;
+import com.ballgame.soccer.stats.LeaderboardBroadcaster;
 import com.ballgame.soccer.stats.StatsManager;
+import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -36,6 +43,7 @@ public final class SoccerPlugin extends JavaPlugin {
     private ChampionshipManager championshipManager;
     private CrowdResourcePack crowdPack;
     private NetworkManager networkManager;
+    private LeaderboardBroadcaster leaderboardBroadcaster;
     private BukkitTask autoSaveTask;
 
     @Override
@@ -65,10 +73,21 @@ public final class SoccerPlugin extends JavaPlugin {
 
         this.gameManager = new GameManager(this);
         this.gameManager.start();
+        scheduleOrphanBallCleanup();
+
+        this.leaderboardBroadcaster = new LeaderboardBroadcaster(this);
+        this.leaderboardBroadcaster.start();
 
         registerListeners();
         registerCommands();
         scheduleAutoSave();
+
+        BotNpcDiagnostics.logAtEnable(getLogger());
+        if (settings.botsEnabled) {
+            getLogger().info("Bot visual mode: " + settings.botVisualType
+                    + " | Citizens=" + CitizensSupport.isAvailable()
+                    + " | Mannequin=" + MannequinSupport.isAvailable());
+        }
 
         getLogger().info("AdvancedSoccer enabled. Lace up!");
     }
@@ -80,6 +99,9 @@ public final class SoccerPlugin extends JavaPlugin {
         }
         if (gameManager != null) {
             gameManager.stop();
+        }
+        if (leaderboardBroadcaster != null) {
+            leaderboardBroadcaster.stop();
         }
         if (arenaManager != null) {
             arenaManager.save();
@@ -111,6 +133,9 @@ public final class SoccerPlugin extends JavaPlugin {
             crowdPack.stop();
             crowdPack.start();
         }
+        if (leaderboardBroadcaster != null) {
+            leaderboardBroadcaster.restart();
+        }
     }
 
     private void registerListeners() {
@@ -129,6 +154,21 @@ public final class SoccerPlugin extends JavaPlugin {
             getCommand("soccer").setExecutor(command);
             getCommand("soccer").setTabCompleter(command);
         }
+        LeaderboardCommand leaderboardCommand = new LeaderboardCommand(this);
+        if (getCommand("leaderboard") != null) {
+            getCommand("leaderboard").setExecutor(leaderboardCommand);
+            getCommand("leaderboard").setTabCompleter(leaderboardCommand);
+        }
+    }
+
+    /** Scans configured arenas for stray ball entities left from older builds. */
+    private void scheduleOrphanBallCleanup() {
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            int removed = BallOrphanCleanup.cleanupAllArenas(this);
+            if (removed > 0) {
+                getLogger().info("Removed " + removed + " orphaned soccer ball(s) from arenas.");
+            }
+        }, 40L);
     }
 
     private void scheduleAutoSave() {

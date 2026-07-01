@@ -6,13 +6,16 @@ import com.ballgame.soccer.game.TeamSide;
 import com.ballgame.soccer.util.Items;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Display;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 import org.joml.AxisAngle4f;
@@ -32,6 +35,8 @@ import java.util.UUID;
  * through walls.</p>
  */
 public final class Ball {
+
+    private static final String ENTITY_KEY = "ball";
 
     /** Physical collision radius used against world blocks. */
     private static final double RADIUS = 0.30;
@@ -95,6 +100,54 @@ public final class Ball {
         } catch (Throwable ignored) {
             // Older servers: harmless to skip movement smoothing.
         }
+        display.getPersistentDataContainer().set(
+                entityKey(plugin), PersistentDataType.BYTE, (byte) 1);
+    }
+
+    public static NamespacedKey entityKey(SoccerPlugin plugin) {
+        return new NamespacedKey(plugin, ENTITY_KEY);
+    }
+
+    /** Whether an entity is (or was) a plugin soccer ball display. */
+    public static boolean isBallEntity(Entity entity, SoccerPlugin plugin) {
+        if (!(entity instanceof ItemDisplay display) || display.isDead()) {
+            return false;
+        }
+        if (display.getPersistentDataContainer().has(entityKey(plugin), PersistentDataType.BYTE)) {
+            return true;
+        }
+        return looksLikeLegacyBall(display);
+    }
+
+    private static boolean looksLikeLegacyBall(ItemDisplay display) {
+        if (display.getBillboard() != Display.Billboard.FIXED) {
+            return false;
+        }
+        ItemStack stack = display.getItemStack();
+        if (stack == null || stack.getType().isAir()) {
+            return false;
+        }
+        Material mat = stack.getType();
+        if (mat != Material.SNOWBALL && mat != Material.FIREWORK_STAR && mat != Material.PLAYER_HEAD) {
+            return false;
+        }
+        try {
+            float range = display.getViewRange();
+            if (range < 1.5f || range > 2.5f) {
+                return false;
+            }
+        } catch (Throwable ignored) {
+            // Older servers may not expose view range.
+        }
+        try {
+            float scale = display.getTransformation().getScale().x();
+            if (scale < 0.5f || scale > 0.7f) {
+                return false;
+            }
+        } catch (Throwable ignored) {
+            // If transformation is unavailable, rely on item + billboard only.
+        }
+        return true;
     }
 
     public void remove() {

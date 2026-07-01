@@ -103,11 +103,33 @@ public final class StatsManager {
     }
 
     public List<PlayerStats> leaderboard(ToIntFunction<PlayerStats> key, int limit) {
-        List<PlayerStats> all = new ArrayList<>(cache.values());
+        List<PlayerStats> all = new ArrayList<>();
+        for (PlayerStats stats : cache.values()) {
+            if (key.applyAsInt(stats) > 0) {
+                all.add(stats);
+            }
+        }
         all.sort(Comparator.comparingInt(key).reversed());
         if (all.size() > limit) {
             return all.subList(0, limit);
         }
         return all;
+    }
+
+    /** Removes one player's lifetime stats from memory and {@code stats.yml}. */
+    public boolean reset(UUID uuid) {
+        if (cache.remove(uuid) == null) {
+            return false;
+        }
+        save();
+        return true;
+    }
+
+    /** Clears all stored player stats. Returns how many records were removed. */
+    public int resetAll() {
+        int count = cache.size();
+        cache.clear();
+        save();
+        return count;
     }
 }

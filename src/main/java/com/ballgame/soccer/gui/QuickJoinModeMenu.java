@@ -46,14 +46,14 @@ public final class QuickJoinModeMenu extends AbstractMenu {
     }
 
     private static void openTeamsFlow(SoccerPlugin plugin, Player player) {
-        var target = plugin.games().findQuickJoinTarget(QuickJoinMode.TEAMS);
-        if (target == null) {
+        if (plugin.games().findQuickJoinTarget(QuickJoinMode.TEAMS) == null) {
             plugin.messages().send(player, "no-arenas-available");
             return;
         }
         if (plugin.settings().quickjoinTeamPick) {
-            QuickJoinMenu.open(plugin, player, target.arena(), target.game(), QuickJoinMode.TEAMS, 0);
+            QuickJoinArenaMenu.open(plugin, player, QuickJoinMode.TEAMS, 0, 0);
         } else {
+            var target = plugin.games().findQuickJoinTarget(QuickJoinMode.TEAMS);
             plugin.games().join(player, target.arena(), null);
         }
     }

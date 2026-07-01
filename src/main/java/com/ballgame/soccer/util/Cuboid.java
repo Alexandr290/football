@@ -5,6 +5,9 @@ import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.util.Vector;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * An axis-aligned cuboid region defined by two corners in a single world.
  * Used for arena bounds and goal boxes. Immutable.
@@ -83,8 +86,8 @@ public final class Cuboid {
 
     public void save(ConfigurationSection section) {
         section.set("world", world.getName());
-        section.set("min", new double[]{minX, minY, minZ});
-        section.set("max", new double[]{maxX, maxY, maxZ});
+        section.set("min", Arrays.asList(minX, minY, minZ));
+        section.set("max", Arrays.asList(maxX, maxY, maxZ));
     }
 
     public static Cuboid load(ConfigurationSection section, World fallbackWorld) {
@@ -93,13 +96,56 @@ public final class Cuboid {
         if (w == null) {
             return null;
         }
-        java.util.List<Double> min = section.getDoubleList("min");
-        java.util.List<Double> max = section.getDoubleList("max");
-        if (min.size() < 3 || max.size() < 3) {
+        List<Double> min = readCoordinateList(section, "min");
+        List<Double> max = readCoordinateList(section, "max");
+        if (min == null || max == null) {
             return null;
         }
         Location a = new Location(w, min.get(0), min.get(1), min.get(2));
         Location b = new Location(w, max.get(0), max.get(1), max.get(2));
         return new Cuboid(a, b);
+    }
+
+    private static List<Double> readCoordinateList(ConfigurationSection section, String key) {
+        List<Double> values = section.getDoubleList(key);
+        if (values.size() >= 3) {
+            return values;
+        }
+
+        Object raw = section.get(key);
+        if (raw instanceof List<?> list && list.size() >= 3) {
+            Double x = asDouble(list.get(0));
+            Double y = asDouble(list.get(1));
+            Double z = asDouble(list.get(2));
+            if (x != null && y != null && z != null) {
+                return Arrays.asList(x, y, z);
+            }
+        }
+        if (raw instanceof double[] array && array.length >= 3) {
+            return Arrays.asList(array[0], array[1], array[2]);
+        }
+        if (raw instanceof Number[] array && array.length >= 3) {
+            Double x = asDouble(array[0]);
+            Double y = asDouble(array[1]);
+            Double z = asDouble(array[2]);
+            if (x != null && y != null && z != null) {
+                return Arrays.asList(x, y, z);
+            }
+        }
+        return null;
+    }
+
+    private static Double asDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value instanceof String string) {
+            try {
+                return Double.parseDouble(string);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 }

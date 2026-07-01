@@ -1,6 +1,7 @@
 package com.ballgame.soccer.game;
 
 import com.ballgame.soccer.arena.ThrowInGeometry;
+import com.ballgame.soccer.arena.TouchlineMath;
 import com.ballgame.soccer.config.SoccerSettings;
 import com.ballgame.soccer.util.Cuboid;
 import org.bukkit.Color;
@@ -59,7 +60,13 @@ final class ThrowInRestartHelper {
 
     static Location clampTakerPosition(Location current, Location anchor, ThrowInGeometry geometry,
                                        Cuboid field, double wanderBlocks) {
-        if (current == null || anchor == null || field == null || geometry == null) {
+        if (current == null || anchor == null || geometry == null) {
+            return current;
+        }
+        if (geometry.customLine()) {
+            return clampTakerOnCustomLine(current, anchor, geometry, wanderBlocks);
+        }
+        if (field == null) {
             return current;
         }
         double inset = 0.28;
@@ -100,8 +107,51 @@ final class ThrowInRestartHelper {
         return clamped;
     }
 
+    private static Location clampTakerOnCustomLine(Location current, Location anchor,
+                                                   ThrowInGeometry geometry, double wanderBlocks) {
+        Location lineStart = geometry.lineStart();
+        Location lineEnd = geometry.lineEnd();
+        Vector outward = geometry.outward();
+        if (outward.lengthSquared() < 1e-6) {
+            outward = new Vector(0, 0, -1);
+        }
+        outward.normalize();
+
+        double segLen = Math.hypot(lineEnd.getX() - lineStart.getX(), lineEnd.getZ() - lineStart.getZ());
+        double anchorParam = TouchlineMath.projectParam(anchor, lineStart, lineEnd);
+        double currentParam = TouchlineMath.projectParam(current, lineStart, lineEnd);
+        if (segLen > 1e-6) {
+            double lateral = (currentParam - anchorParam) * segLen;
+            if (Math.abs(lateral) > wanderBlocks) {
+                currentParam = anchorParam + Math.signum(lateral) * wanderBlocks / segLen;
+            }
+        }
+        currentParam = Math.max(0.0, Math.min(1.0, currentParam));
+
+        Location onLine = new Location(
+                lineStart.getWorld(),
+                lineStart.getX() + (lineEnd.getX() - lineStart.getX()) * currentParam,
+                current.getY(),
+                lineStart.getZ() + (lineEnd.getZ() - lineStart.getZ()) * currentParam);
+
+        Location clamped = onLine.clone().add(outward.clone().multiply(0.55));
+        if (TouchlineMath.dotXZ(onLine, clamped, geometry.inward().getX(), geometry.inward().getZ()) > 0.02) {
+            clamped = onLine.clone().add(outward.clone().multiply(0.55));
+        }
+        clamped.setYaw(anchor.getYaw());
+        clamped.setPitch(current.getPitch());
+        return clamped;
+    }
+
     static boolean hasCrossedTouchlineOutward(Location loc, ThrowInGeometry geometry, Cuboid field) {
-        if (loc == null || field == null || geometry == null) {
+        if (loc == null || geometry == null) {
+            return false;
+        }
+        if (geometry.customLine()) {
+            return TouchlineMath.dotXZ(geometry.spot(), loc,
+                    geometry.inward().getX(), geometry.inward().getZ()) > 0.15;
+        }
+        if (field == null) {
             return false;
         }
         double margin = 0.12;
@@ -132,6 +182,27 @@ final class ThrowInRestartHelper {
             player.setGlowing(true);
         }
         player.setWalkSpeed(0.22f);
+    }
+
+    static boolean isBallInPlay(ThrowInGeometry geometry, Location ballLoc, Cuboid field) {
+        if (ballLoc == null || geometry == null) {
+            return false;
+        }
+        if (geometry.customLine()) {
+            return TouchlineMath.dotXZ(
+                    geometry.spot(),
+                    ballLoc,
+                    geometry.inward().getX(),
+                    geometry.inward().getZ()) > 0.35;
+        }
+        if (field == null) {
+            return true;
+        }
+        double inset = 0.55;
+        return ballLoc.getX() >= field.getMinX() + inset
+                && ballLoc.getX() <= field.getMaxX() - inset
+                && ballLoc.getZ() >= field.getMinZ() + inset
+                && ballLoc.getZ() <= field.getMaxZ() - inset;
     }
 
     static void clearParticipantMovement(Player player) {

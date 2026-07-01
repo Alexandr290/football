@@ -5,7 +5,7 @@
 # the game without touching code. Colors use '&' codes (and hex &#RRGGBB).
 # =====================================================================
 
-config-version: 20
+config-version: 22
 
 settings:
   # Chat prefix (overrides the language file prefix when set).
@@ -23,7 +23,9 @@ settings:
 game:
   # Players required per team before a match can auto-start.
   min-players-per-team: 1
-  max-players-per-team: 5
+  # Raised so a full solo match (a player plus up to 10 AI team-mates, against up
+  # to 10 AI opponents) fits on each side.
+  max-players-per-team: 11
   # Seconds of the lobby countdown once enough players have joined.
   lobby-countdown: 15
   # Seconds of the kickoff countdown (3..2..1..GO) before the ball unlocks.
@@ -97,15 +99,36 @@ network:
 # ---------------------------------------------------------------------
 bots:
   enabled: true
-  # auto = Citizens player NPC if Citizens is installed, else Mannequin on 1.21.4+, else armor stand
-  # citizens | mannequin | armor_stand
+  # How bots are rendered. They look and animate like real NPC players in every
+  # mode except the last-resort armor stand.
+  #   auto        = Citizens NPC if installed, else a built-in packet player NPC
+  #                 (real player model + skin, no plugins needed), else Mannequin
+  #                 (1.21.4+), else armor stand.
+  #   player/npc  = force the built-in packet player NPC.
+  #   citizens | mannequin | armor_stand = force that specific backend.
   visual: auto
   min-solo-count: 1
-  max-solo-count: 5
-  default-solo-count: 3
-  # Blocks per tick — matches vanilla walk (~0.216) and sprint (~0.281) at 20 TPS.
+  # Up to 10 bots can be added per side (opponents and/or your own team).
+  max-solo-count: 10
+  default-solo-count: 4
+  # How many AI team-mates are pre-selected when opening the solo menu (0 = none).
+  default-teammate-count: 0
+  # Blocks per tick — walk matches vanilla (~0.216); sprint matches a real
+  # player-like burst so bots can accelerate into space and chase loose balls.
   walk-speed: 0.216
-  sprint-speed: 0.281
+  sprint-speed: 0.36
+  # Bot stamina. When enabled, bots can only sprint while they have stamina; once
+  # drained they drop to a tired jog and must recover before sprinting again —
+  # just like human players. This produces realistic late-game tempo swings.
+  stamina-enabled: true
+  max-stamina: 100.0
+  # Stamina recovered per tick while not sprinting (20 ticks = 1 second).
+  stamina-regen: 0.65
+  # Stamina burned per tick while sprinting.
+  sprint-drain: 0.5
+  # Once exhausted, a bot must regenerate back above this value before it can
+  # sprint again (prevents stutter-sprinting on empty).
+  stamina-recover-threshold: 35.0
   names:
     - "Striker"
     - "Midfielder"
@@ -175,11 +198,12 @@ replay:
 crowd:
   enabled: true
   volume: 0.85
-  # false = vanilla crowd ambience + shouts (no resource pack needed).
-  # true = real stadium recordings (requires resource pack — see /soccer crowdpack).
-  real-sounds: false
-  # Ticks between ambience bed layers (20 ticks = 1 sec). Lower = denser continuous crowd.
-  ambience-interval-ticks: 8
+  # false = vanilla non-animal stadium effects (no resource pack needed).
+  # true = real stadium crowd pack (auto-offered below).
+  real-sounds: true
+  # Ticks between long ambience bed layers (20 ticks = 1 sec).
+  # The plugin automatically shortens this near the goals for louder pressure.
+  ambience-interval-ticks: 70
   danger-radius: 18.0
   danger-min-speed: 0.75
   goal-celebration: true
@@ -187,9 +211,9 @@ crowd:
   react-to-shots: true
   resource-pack:
     # manual = local install only, no server download | download | url
-    mode: manual
-    auto-serve: false
-    prompt-on-join: false
+    mode: download
+    auto-serve: true
+    prompt-on-join: true
     port: 8123
     public-host: ""
     url: ""
@@ -301,6 +325,22 @@ scoreboard:
   enabled: true
   # title: "&a&lADVANCED SOCCER"
   # lines: []
+
+# ---------------------------------------------------------------------
+# Chat leaderboards — /leaderboard, /soccer top, periodic broadcasts
+# ---------------------------------------------------------------------
+leaderboard:
+  # Post a rotating leaderboard to chat every N seconds. 0 = disabled.
+  broadcast-interval: 1800
+  # Rows shown for /soccer top and /leaderboard <category>.
+  entries: 10
+  # Rows per category when using /leaderboard or /soccer top all.
+  overview-entries: 3
+  # Categories cycled through each broadcast (goals, wins, assists, tackles, saves, clean-sheets).
+  broadcast-categories:
+    - goals
+    - wins
+    - assists
 
 # ---------------------------------------------------------------------
 # Teams

@@ -208,7 +208,7 @@ public final class NetworkManager {
         }
 
         boolean joined = request.mode() == QuickJoinMode.SOLO
-                ? plugin.games().joinSolo(player, target.arena(), request.team(), request.botCount())
+                ? plugin.games().joinSolo(player, target.arena(), request.team(), request.botCount(), request.teammateCount())
                 : plugin.games().join(player, target.arena(), request.team());
         if (!joined && request.team() != null) {
             plugin.messages().send(player, "quickjoin-team-full",

@@ -2,6 +2,9 @@ package com.ballgame.soccer.game;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
+import com.ballgame.soccer.championship.ChampFixture;
+import com.ballgame.soccer.championship.Championship;
+import com.ballgame.soccer.championship.FixtureState;
 import com.ballgame.soccer.gui.QuickJoinModeMenu;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -29,6 +32,7 @@ public final class GameManager {
     private final Map<String, Game> gamesByArena = new HashMap<>();
     private final Map<UUID, Game> gamesByPlayer = new HashMap<>();
     private BukkitTask tickTask;
+    private long viewerSyncCounter;
 
     public GameManager(SoccerPlugin plugin) {
         this.plugin = plugin;
@@ -65,6 +69,60 @@ public final class GameManager {
                 ex.printStackTrace();
             }
         }
+        if (++viewerSyncCounter % 20 == 0) {
+            syncServerViewers();
+        }
+    }
+
+    /**
+     * Ensures every online player sees the primary live match score (TV ticker +
+     * sidebar). Match participants are always wired in; everyone else becomes a
+     * server-wide spectator.
+     */
+    public void syncServerViewers() {
+        Game primary = selectPrimaryBroadcastGame();
+        for (Game game : new ArrayList<>(gamesByArena.values())) {
+            if (game.isEnded()) {
+                continue;
+            }
+            if (game != primary) {
+                for (Player online : Bukkit.getOnlinePlayers()) {
+                    Game theirMatch = gamesByPlayer.get(online.getUniqueId());
+                    if (theirMatch != game) {
+                        game.detachServerViewer(online);
+                    }
+                }
+            }
+        }
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            Game theirMatch = gamesByPlayer.get(online.getUniqueId());
+            Game show = theirMatch != null && !theirMatch.isEnded() ? theirMatch : primary;
+            if (show == null) {
+                continue;
+            }
+            show.attachServerViewer(online);
+            for (Game other : gamesByArena.values()) {
+                if (other != show && !other.isEnded()) {
+                    other.detachServerViewer(online);
+                }
+            }
+        }
+    }
+
+    private Game selectPrimaryBroadcastGame() {
+        Game best = null;
+        int bestRank = 0;
+        for (Game game : gamesByArena.values()) {
+            if (game.isEnded()) {
+                continue;
+            }
+            int rank = game.broadcastPriority();
+            if (rank > bestRank) {
+                bestRank = rank;
+                best = game;
+            }
+        }
+        return best;
     }
 
     /**
@@ -163,6 +221,20 @@ public final class GameManager {
     }
 
     public boolean joinSolo(Player player, Arena arena, TeamSide team, int botCount) {
+        return joinSolo(player, arena, team, botCount, 0);
+    }
+
+    public boolean joinSolo(Player player, Arena arena, TeamSide team, int botCount, int teammateBots) {
+        return joinSolo(player, arena, team, botCount, teammateBots, BotDifficulty.MEDIUM);
+    }
+
+    public boolean joinSolo(Player player, Arena arena, TeamSide team, int botCount,
+                            int teammateBots, BotDifficulty difficulty) {
+        return joinSolo(player, arena, team, botCount, teammateBots, difficulty, difficulty);
+    }
+
+    public boolean joinSolo(Player player, Arena arena, TeamSide team, int botCount,
+                            int teammateBots, BotDifficulty redDifficulty, BotDifficulty blueDifficulty) {
         if (!plugin.settings().botsEnabled) {
             return join(player, arena, team);
         }
@@ -183,7 +255,12 @@ public final class GameManager {
         }
         int opponents = Math.min(botCount, plugin.settings().botMaxSoloCount);
         opponents = Math.min(opponents, plugin.settings().maxPlayersPerTeam);
-        TeamSide botTeam = team != null ? team.opposite() : TeamSide.BLUE;
+        TeamSide playerTeam = team != null ? team : TeamSide.RED;
+        TeamSide botTeam = playerTeam.opposite();
+        // The player occupies one slot on their own side, so team-mate bots are
+        // capped one below the team limit.
+        int allies = Math.min(teammateBots, plugin.settings().botMaxSoloCount);
+        allies = Math.min(allies, Math.max(0, plugin.settings().maxPlayersPerTeam - 1));
 
         Game game = gamesByArena.get(key(arena));
         if (game != null && !game.isEnded() && !game.isSoloMatch()) {
@@ -204,6 +281,8 @@ public final class GameManager {
             game.setSoloMatch(true);
             gamesByArena.put(key(arena), game);
         }
+        game.setBotDifficulty(TeamSide.RED, redDifficulty);
+        game.setBotDifficulty(TeamSide.BLUE, blueDifficulty);
         if (game.isFull() || (team != null && game.isTeamFull(team))) {
             plugin.messages().send(player, "game-full");
             return false;
@@ -215,9 +294,12 @@ public final class GameManager {
         plugin.network().clearLobbyReturn(player);
 
         int currentOpponentBots = 0;
+        int currentAllyBots = 0;
         for (var bot : game.getBots()) {
             if (bot.getTeam() == botTeam) {
                 currentOpponentBots++;
+            } else if (bot.getTeam() == playerTeam) {
+                currentAllyBots++;
             }
         }
         for (int i = currentOpponentBots; i < opponents; i++) {
@@ -226,8 +308,17 @@ public final class GameManager {
             }
             game.addBot(botTeam, i);
         }
+        for (int i = currentAllyBots; i < allies; i++) {
+            if (game.isTeamFull(playerTeam)) {
+                break;
+            }
+            game.addBot(playerTeam, i);
+        }
         plugin.messages().send(player, "solo-match-ready",
-                "count", String.valueOf(opponents), "team", game.getTeamDisplayName(botTeam));
+                "count", String.valueOf(opponents),
+                "team", game.getTeamDisplayName(botTeam),
+                "red_difficulty", plugin.messages().raw(game.getBotDifficulty(TeamSide.RED).langKey()),
+                "blue_difficulty", plugin.messages().raw(game.getBotDifficulty(TeamSide.BLUE).langKey()));
         return true;
     }
 
@@ -280,6 +371,13 @@ public final class GameManager {
         return null;
     }
 
+    public Game getGame(Arena arena) {
+        if (arena == null) {
+            return null;
+        }
+        return gamesByArena.get(key(arena));
+    }
+
     public boolean joinChampionship(Player player, Arena arena, TeamSide side,
                                     String championshipId, String fixtureId) {
         return joinChampionship(player, arena, side, championshipId, fixtureId, null, null);
@@ -296,7 +394,21 @@ public final class GameManager {
             plugin.messages().send(player, "arena-not-ready");
             return false;
         }
+        if (!plugin.championships().verifyPlayerOnFixtureSide(
+                player, championshipId, fixtureId, side)) {
+            plugin.messages().send(player, "champ-fixture-wrong-team",
+                    "team_a", redDisplayName != null ? redDisplayName : "?",
+                    "team_b", blueDisplayName != null ? blueDisplayName : "?");
+            return false;
+        }
         Game game = findGameByFixture(championshipId, fixtureId);
+        if (game != null && !game.isEnded()) {
+            GameState state = game.getState();
+            if (state != GameState.WAITING && state != GameState.COUNTDOWN) {
+                plugin.messages().send(player, "match-already-started");
+                return false;
+            }
+        }
         if (game == null) {
             game = new Game(plugin, arena);
             game.setChampionship(championshipId, fixtureId);
@@ -316,7 +428,84 @@ public final class GameManager {
         return false;
     }
 
-    private Game findGameByFixture(String championshipId, String fixtureId) {
+    public int addChampionshipBots(Championship championship, ChampFixture fixture,
+                                   int redBots, int blueBots, BotDifficulty difficulty) {
+        return addChampionshipBots(championship, fixture, redBots, blueBots, difficulty, difficulty);
+    }
+
+    public int addChampionshipBots(Championship championship, ChampFixture fixture,
+                                   int redBots, int blueBots,
+                                   BotDifficulty redDifficulty, BotDifficulty blueDifficulty) {
+        if (!plugin.settings().botsEnabled || championship == null || fixture == null) {
+            return 0;
+        }
+        if (fixture.getState() == FixtureState.COMPLETED || fixture.getState() == FixtureState.LIVE) {
+            return 0;
+        }
+        if (!plugin.championships().canJoinFixture(championship, fixture)) {
+            return 0;
+        }
+
+        Game game = findGameByFixture(championship.getId(), fixture.getId());
+        if (game != null && !game.isEnded()) {
+            GameState state = game.getState();
+            if (state != GameState.WAITING && state != GameState.COUNTDOWN) {
+                return 0;
+            }
+            game.setBotDifficulty(TeamSide.RED, redDifficulty);
+            game.setBotDifficulty(TeamSide.BLUE, blueDifficulty);
+        }
+
+        String arenaName = plugin.championships().resolveFixtureArenaName(championship, fixture);
+        Arena arena = plugin.arenas().get(arenaName);
+        if (arena == null || !arena.isPlayable()) {
+            return 0;
+        }
+
+        Game arenaGame = gamesByArena.get(key(arena));
+        if (game == null) {
+            if (arenaGame != null && !arenaGame.isEnded()) {
+                return 0;
+            }
+            game = new Game(plugin, arena);
+            game.setChampionship(championship.getId(), fixture.getId());
+            game.setMatchTeamNames(fixture.sideADisplay(championship), fixture.sideBDisplay(championship));
+            game.setBotDifficulty(TeamSide.RED, redDifficulty);
+            game.setBotDifficulty(TeamSide.BLUE, blueDifficulty);
+            gamesByArena.put(key(arena), game);
+        }
+
+        int added = 0;
+        added += addBotsToChampionshipSide(game, TeamSide.RED, Math.max(0, redBots));
+        added += addBotsToChampionshipSide(game, TeamSide.BLUE, Math.max(0, blueBots));
+        if (added == 0 && redBots <= 0 && blueBots <= 0) {
+            return -1;
+        }
+        return added;
+    }
+
+    private int addBotsToChampionshipSide(Game game, TeamSide side, int requested) {
+        int added = 0;
+        int index = botCount(game, side);
+        for (int i = 0; i < requested && !game.isTeamFull(side); i++) {
+            if (game.addBot(side, index + i) != null) {
+                added++;
+            }
+        }
+        return added;
+    }
+
+    private int botCount(Game game, TeamSide side) {
+        int count = 0;
+        for (com.ballgame.soccer.bot.MatchBot bot : game.getBots()) {
+            if (bot.getTeam() == side) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public Game findGameByFixture(String championshipId, String fixtureId) {
         for (Game game : gamesByArena.values()) {
             if (game.isEnded()) {
                 continue;

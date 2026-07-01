@@ -15,6 +15,10 @@ commands:
     description: Main command for the AdvancedSoccer plugin.
     usage: /soccer help
     aliases: [sc, football, ball]
+  leaderboard:
+    description: View soccer stat leaderboards in chat.
+    usage: /leaderboard [category|all]
+    aliases: [lb, tops]
 
 permissions:
   soccer.*:

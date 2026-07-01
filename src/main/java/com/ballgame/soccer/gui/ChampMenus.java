@@ -11,6 +11,8 @@ import com.ballgame.soccer.championship.ChampStanding;
 import com.ballgame.soccer.championship.ChampTeam;
 import com.ballgame.soccer.championship.FixtureState;
 import com.ballgame.soccer.config.Messages;
+import com.ballgame.soccer.game.Game;
+import com.ballgame.soccer.game.GameState;
 import com.ballgame.soccer.util.Items;
 import com.ballgame.soccer.util.Text;
 import org.bukkit.Bukkit;
@@ -22,7 +24,9 @@ import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public final class ChampMenus {
@@ -32,6 +36,14 @@ public final class ChampMenus {
 
     public static void openMain(SoccerPlugin plugin, Player player) {
         new MainMenu(plugin, player).open();
+    }
+
+    public static void openScheduleMenu(SoccerPlugin plugin, Player player, String championshipId) {
+        new ScheduleOpponentMenu(plugin, player, championshipId).open();
+    }
+
+    public static void openFixturesMenu(SoccerPlugin plugin, Player player, String championshipId) {
+        new FixturesMenu(plugin, player, championshipId).open();
     }
 
     private static final class MainMenu extends AbstractMenu {
@@ -113,7 +125,8 @@ public final class ChampMenus {
             }
 
             ChampTeam myTeam = championship.findTeamOf(viewer.getUniqueId());
-            List<ChampFixture> pending = championship.pendingFixturesFor(viewer.getUniqueId());
+            List<ChampFixture> joinable = plugin.championships()
+                    .joinableFixturesFor(championship, viewer.getUniqueId());
 
             inventory.setItem(4, Items.named(Material.NETHER_STAR,
                     "&6&l" + championship.getDisplayName(),
@@ -221,7 +234,7 @@ public final class ChampMenus {
 
             inventory.setItem(31, Items.named(Material.PAPER,
                     msg.raw("champ-gui-fixtures"),
-                    "&7Pending for you: &f" + pending.size()));
+                    "&7Pending for you: &f" + joinable.size()));
             registerClick(31, () -> new FixturesMenu(plugin, viewer, championshipId).open());
 
             if (championship.isRegistrationOpen()
@@ -237,8 +250,8 @@ public final class ChampMenus {
                     || plugin.championships().isWorldCupGroupCalendarComplete(championship);
             if ((championship.getState() == ChampionshipState.ACTIVE
                     || championship.getState() == ChampionshipState.REGISTRATION)
-                    && !pending.isEmpty()) {
-                final ChampFixture joinFixture = pending.get(0);
+                    && !joinable.isEmpty()) {
+                final ChampFixture joinFixture = joinable.get(0);
                 boolean canJoin = plugin.championships().canJoinFixture(championship, joinFixture);
                 if (canJoin) {
                     inventory.setItem(40, Items.named(Material.EMERALD,
@@ -246,7 +259,8 @@ public final class ChampMenus {
                             msg.raw("champ-gui-join-match-lore")));
                     registerClick(40, () -> {
                         if (plugin.championships().joinFixtureMatch(viewer, championship, joinFixture)) {
-                            msg.send(viewer, "champ-joined-match", "arena", championship.getArenaName());
+                            msg.send(viewer, "champ-joined-match", "arena",
+                                    plugin.championships().resolveFixtureArenaName(championship, joinFixture));
                             viewer.closeInventory();
                         } else {
                             msg.send(viewer, "champ-join-failed");
@@ -572,17 +586,16 @@ public final class ChampMenus {
                         msg.raw("champ-group-results-match"),
                         matchLore.toArray(new String[0])));
 
-                boolean canJoin = plugin.championships().canJoinFixture(championship, match)
-                        && match.involvesPlayer(championship, viewer.getUniqueId())
-                        && (match.getState() == FixtureState.PENDING
-                        || match.getState() == FixtureState.LIVE);
+                boolean canJoin = plugin.championships()
+                        .canPlayerJoinFixture(championship, match, viewer.getUniqueId());
                 if (canJoin) {
                     inventory.setItem(40, Items.named(Material.EMERALD,
                             msg.raw("champ-gui-join-match"),
                             msg.raw("champ-gui-fixture-join-lore")));
                     registerClick(40, () -> {
                         if (plugin.championships().joinFixtureMatch(viewer, championship, match)) {
-                            msg.send(viewer, "champ-joined-match", "arena", championship.getArenaName());
+                            msg.send(viewer, "champ-joined-match", "arena",
+                                    plugin.championships().resolveFixtureArenaName(championship, match));
                             viewer.closeInventory();
                         } else {
                             msg.send(viewer, "champ-join-failed");
@@ -697,10 +710,13 @@ public final class ChampMenus {
                     if (inThisTeam && canLeave) {
                         lore.add(Text.color(""));
                         lore.add(Text.color("&cClick to leave this team"));
-                    } else if (canJoin && !inThisTeam
-                            && championship.findTeamOf(viewer.getUniqueId()) == null) {
+                    } else if (canJoin && !inThisTeam && !team.isEliminated()) {
                         lore.add(Text.color(""));
-                        lore.add(Text.color("&aClick to join this team"));
+                        if (championship.findTeamOf(viewer.getUniqueId()) != null) {
+                            lore.add(Text.color("&eClick to switch to this team"));
+                        } else {
+                            lore.add(Text.color("&aClick to join this team"));
+                        }
                     }
                     meta.setLore(lore);
                     head.setItemMeta(meta);
@@ -716,7 +732,7 @@ public final class ChampMenus {
                     });
                 } else if (!inThisTeam
                         && plugin.championships().canJoinTeam(championship)
-                        && championship.findTeamOf(viewer.getUniqueId()) == null) {
+                        && !team.isEliminated()) {
                     registerClick(slot, () -> {
                         if (plugin.championships().joinTeam(championship, viewer, teamId)) {
                             msg.send(viewer, "champ-joined-team", "team", team.getName());
@@ -744,6 +760,7 @@ public final class ChampMenus {
     private static final class FixturesMenu extends AbstractMenu {
 
         private final String championshipId;
+        private final Map<Integer, Runnable> botActions = new HashMap<>();
 
         FixturesMenu(SoccerPlugin plugin, Player viewer, String championshipId) {
             super(plugin, viewer, plugin.messages().raw("champ-gui-fixtures-title"), 6);
@@ -752,6 +769,7 @@ public final class ChampMenus {
 
         @Override
         protected void render() {
+            botActions.clear();
             fillBorder(Material.YELLOW_STAINED_GLASS_PANE);
             Messages msg = plugin.messages();
             Championship championship = plugin.championships().get(championshipId);
@@ -788,35 +806,47 @@ public final class ChampMenus {
                 }
                 String line = fixture.sideADisplay(championship) + " vs "
                         + fixture.sideBDisplay(championship);
-                String score = fixture.getState() == FixtureState.COMPLETED
-                        ? fixture.getScoreA() + " - " + fixture.getScoreB()
-                        : fixture.getState().display();
                 String roundLabel = fixture.getRound() == 0
                         ? msg.raw("champ-gui-fixture-scheduled-label")
                         : "&7Round: &f" + fixture.getRound();
+                boolean involves = fixture.involvesPlayer(championship, viewer.getUniqueId());
                 boolean canJoin = calendarReady
-                        && fixture.getState() == FixtureState.PENDING
-                        && fixture.involvesPlayer(championship, viewer.getUniqueId());
+                        && plugin.championships().canPlayerJoinFixture(
+                        championship, fixture, viewer.getUniqueId());
+                String statusLine = fixtureStatusLine(plugin, msg, championship, fixture);
+                String arenaLine = msg.format("champ-gui-fixture-arena",
+                        "arena", nullOr(plugin.championships().resolveFixtureArenaName(championship, fixture), "-"));
                 ItemStack item = Items.named(canJoin ? Material.WRITABLE_BOOK : Material.BOOK,
                         (canJoin ? "&a&l" : "&e") + line,
                         roundLabel,
-                        "&7Status: &f" + score);
+                        arenaLine,
+                        "&7Status: &f" + statusLine);
                 if (canJoin) {
                     item = Items.named(Material.WRITABLE_BOOK,
                             "&a&l" + line,
                             roundLabel,
-                            "&7Status: &f" + score,
+                            arenaLine,
+                            "&7Status: &f" + statusLine,
                             "",
-                            msg.raw("champ-gui-fixture-join-lore"));
+                            msg.raw("champ-gui-fixture-join-lore"),
+                            msg.raw("champ-gui-fixture-bots-lore"));
+                } else if (involves
+                        && fixture.getState() == FixtureState.LIVE) {
+                    item = Items.named(Material.ORANGE_CONCRETE,
+                            "&c&l" + line,
+                            roundLabel,
+                            "&7Status: &f" + statusLine,
+                            "",
+                            msg.raw("match-already-started"));
                 } else if (fixture.getState() == FixtureState.PENDING
-                        && fixture.involvesPlayer(championship, viewer.getUniqueId())
+                        && involves
                         && wcKnockout
                         && plugin.championships().isWorldCupGroupFixture(championship, fixture)
                         && !calendarReady) {
                     item = Items.named(Material.ORANGE_STAINED_GLASS,
                             "&6" + line,
                             roundLabel,
-                            "&7Status: &f" + score,
+                            "&7Status: &f" + statusLine,
                             "",
                             msg.raw("champ-wc-need-scheduled-lore"));
                 }
@@ -825,12 +855,15 @@ public final class ChampMenus {
                 if (canJoin) {
                     registerClick(slot, () -> {
                         if (plugin.championships().joinFixtureMatch(viewer, championship, selected)) {
-                            msg.send(viewer, "champ-joined-match", "arena", championship.getArenaName());
+                            msg.send(viewer, "champ-joined-match", "arena",
+                                    plugin.championships().resolveFixtureArenaName(championship, selected));
                             viewer.closeInventory();
                         } else {
                             msg.send(viewer, "champ-join-failed");
                         }
                     });
+                    botActions.put(slot, () -> ChampBotsMenu.open(plugin, viewer,
+                            championshipId, selected.getId(), 0, 0));
                 }
                 slot++;
             }
@@ -839,6 +872,14 @@ public final class ChampMenus {
 
         @Override
         public void handleClick(int slot, ClickType type) {
+            if (type.isRightClick()) {
+                Runnable botAction = botActions.get(slot);
+                if (botAction != null) {
+                    clickSound();
+                    botAction.run();
+                    return;
+                }
+            }
             Runnable action = MenuClicks.get(Integer.toHexString(System.identityHashCode(inventory)), slot);
             if (action != null) {
                 clickSound();
@@ -954,5 +995,21 @@ public final class ChampMenus {
         }
         return Bukkit.getOfflinePlayer(uuid).getName() != null
                 ? Bukkit.getOfflinePlayer(uuid).getName() : uuid.toString().substring(0, 8);
+    }
+
+    private static String fixtureStatusLine(SoccerPlugin plugin, Messages msg,
+                                            Championship championship, ChampFixture fixture) {
+        if (fixture.getState() == FixtureState.COMPLETED
+                || fixture.getState() == FixtureState.LIVE) {
+            return fixture.getScoreA() + " - " + fixture.getScoreB();
+        }
+        Game game = plugin.games().findGameByFixture(championship.getId(), fixture.getId());
+        if (game != null && !game.isEnded()) {
+            GameState state = game.getState();
+            if (state == GameState.WAITING || state == GameState.COUNTDOWN) {
+                return msg.raw("champ-fixture-waiting-players");
+            }
+        }
+        return fixture.getState().display();
     }
 }

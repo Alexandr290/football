@@ -15,6 +15,9 @@ import java.util.logging.Level;
 /**
  * Merges missing keys from the bundled defaults into the on-disk config and
  * language files without overwriting values the server owner already set.
+ * When {@code config-version} in the on-disk file is behind the bundled
+ * version, targeted migrations bring forward keys whose bundled defaults changed
+ * (only when the server still has the previous default value).
  */
 public final class ConfigUpdater {
 
@@ -34,13 +37,54 @@ public final class ConfigUpdater {
         }
         File file = new File(plugin.getDataFolder(), "config.yml");
         FileConfiguration current = YamlConfiguration.loadConfiguration(file);
+        boolean changed = false;
+
+        int currentVersion = current.getInt("config-version", 0);
+        int targetVersion = defaults.getInt("config-version", 0);
+        if (currentVersion < targetVersion) {
+            applyConfigMigrations(current, currentVersion, targetVersion);
+            current.set("config-version", targetVersion);
+            changed = true;
+        }
+
         if (mergeSections(defaults, current)) {
+            changed = true;
+        }
+
+        if (changed) {
             try {
                 current.save(file);
-                plugin.getLogger().info("config.yml updated with new default options.");
+                plugin.getLogger().info("config.yml updated (version " + currentVersion + " -> " + targetVersion + ").");
             } catch (IOException ex) {
                 plugin.getLogger().log(Level.WARNING, "Could not save merged config.yml", ex);
             }
+        }
+    }
+
+    /**
+     * Apply versioned migrations. Each step only overwrites a key when the
+     * on-disk value still matches the old bundled default, so custom tuning is
+     * preserved.
+     */
+    private static void applyConfigMigrations(FileConfiguration config, int from, int to) {
+        if (from < 21 && to >= 21) {
+            migrateToV21(config);
+        }
+    }
+
+    /** Bot squad size raised to 10 per side; team cap raised to fit player + allies. */
+    private static void migrateToV21(FileConfiguration config) {
+        if (config.getInt("game.max-players-per-team", 5) == 5) {
+            config.set("game.max-players-per-team", 11);
+        }
+        if (config.getInt("bots.max-solo-count", 5) == 5) {
+            config.set("bots.max-solo-count", 10);
+        }
+        if (config.getInt("bots.default-solo-count", 3) == 3) {
+            config.set("bots.default-solo-count", 4);
+        }
+        if (!config.contains("bots.default-teammate-count")) {
+            config.set("bots.default-teammate-count", 0);
         }
     }
 

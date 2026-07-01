@@ -1,6 +1,7 @@
 package com.ballgame.soccer.championship;
 
 import com.ballgame.soccer.SoccerPlugin;
+import com.ballgame.soccer.gui.ChampScheduleArenaMenu;
 import org.bukkit.entity.Player;
 
 import java.util.Map;
@@ -99,47 +100,67 @@ public final class ChampSchedulePrompt {
                 plugin.messages().send(player, "champ-schedule-prompt-side-b");
                 return true;
             }
-            PENDING.remove(player.getUniqueId());
             if (normalized.equalsIgnoreCase(pending.teamAName)) {
                 plugin.messages().send(player, "champ-schedule-same-team");
                 return true;
             }
-            finishSchedule(plugin, player, championship, pending.teamATeamId, normalized);
+            ChampTeam teamB = plugin.championships().ensureTeamByName(championship, normalized);
+            if (teamB == null) {
+                plugin.messages().send(player, "champ-add-team-failed");
+                return true;
+            }
+            openArenaPicker(plugin, player, pending.championshipId, pending.teamATeamId, teamB.getId());
             return true;
         }
 
-        PENDING.remove(player.getUniqueId());
         if (normalized.equalsIgnoreCase(pending.teamAName)) {
             plugin.messages().send(player, "champ-schedule-same-team");
             return true;
         }
-        finishSchedule(plugin, player, championship, pending.teamATeamId, normalized);
+        ChampTeam teamB = plugin.championships().ensureTeamByName(championship, normalized);
+        if (teamB == null) {
+            plugin.messages().send(player, "champ-add-team-failed");
+            return true;
+        }
+        openArenaPicker(plugin, player, pending.championshipId, pending.teamATeamId, teamB.getId());
         return true;
     }
 
-    private static void finishSchedule(SoccerPlugin plugin, Player player, Championship championship,
-                                       String teamAId, String teamBName) {
-        if (teamAId == null) {
+    private static void openArenaPicker(SoccerPlugin plugin, Player player, String championshipId,
+                                        String teamAId, String teamBId) {
+        PENDING.remove(player.getUniqueId());
+        plugin.getServer().getScheduler().runTaskLater(plugin,
+                () -> ChampScheduleArenaMenu.open(plugin, player, championshipId, teamAId, teamBId), 1L);
+    }
+
+    public static void completeSchedule(SoccerPlugin plugin, Player player, String championshipId,
+                                        String teamAId, String teamBId, String arenaName) {
+        Championship championship = plugin.championships().get(championshipId);
+        if (championship == null) {
+            plugin.messages().send(player, "champ-not-found");
+            return;
+        }
+        if (teamAId == null || teamBId == null) {
             plugin.messages().send(player, "champ-schedule-failed");
             return;
         }
-        ChampTeam teamB = plugin.championships().ensureTeamByName(championship, teamBName);
-        if (teamB == null) {
-            plugin.messages().send(player, "champ-add-team-failed");
+        ChampTeam teamA = championship.getTeam(teamAId);
+        ChampTeam teamB = championship.getTeam(teamBId);
+        if (teamA == null || teamB == null) {
+            plugin.messages().send(player, "champ-schedule-failed");
             return;
         }
         ChampFixture[] out = new ChampFixture[1];
         ChampionshipManager.ScheduleMatchResult result = plugin.championships()
-                .scheduleMatch(championship, teamAId, teamB.getId(), out);
-        ChampTeam teamA = championship.getTeam(teamAId);
-        String nameA = teamA != null ? teamA.getName() : "?";
+                .scheduleMatch(championship, teamAId, teamBId, arenaName, out);
+        String nameA = teamA.getName();
         String nameB = teamB.getName();
         if (result == ChampionshipManager.ScheduleMatchResult.CREATED) {
             plugin.messages().send(player, "champ-schedule-success",
-                    "team_a", nameA, "team_b", nameB);
+                    "team_a", nameA, "team_b", nameB, "arena", arenaName);
         } else if (result == ChampionshipManager.ScheduleMatchResult.ALREADY_EXISTS) {
             plugin.messages().send(player, "champ-schedule-already",
-                    "team_a", nameA, "team_b", nameB);
+                    "team_a", nameA, "team_b", nameB, "arena", arenaName);
         } else if (championship.getType() == ChampionshipType.KNOCKOUT
                 && championship.getState() == ChampionshipState.ACTIVE) {
             plugin.messages().send(player, "champ-schedule-knockout-active");

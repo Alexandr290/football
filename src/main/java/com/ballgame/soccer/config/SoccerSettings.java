@@ -3,6 +3,7 @@ package com.ballgame.soccer.config;
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.crowd.CrowdPackMode;
 import com.ballgame.soccer.network.NetworkRole;
+import com.ballgame.soccer.stats.LeaderboardCategory;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.List;
@@ -37,8 +38,14 @@ public final class SoccerSettings {
     public int botMinSoloCount;
     public int botMaxSoloCount;
     public int botDefaultSoloCount;
+    public int botDefaultTeammateCount;
     public double botWalkSpeed;
     public double botSprintSpeed;
+    public boolean botStaminaEnabled;
+    public double botMaxStamina;
+    public double botStaminaRegen;
+    public double botSprintDrain;
+    public double botStaminaRecoverThreshold;
     public java.util.List<String> botNames;
     public String botVisualType;
     public java.util.List<String> botSkinNames;
@@ -61,6 +68,12 @@ public final class SoccerSettings {
     public double offsideOpponentRestrainRadius;
     public double offsideOpponentMinGap;
     public boolean broadcastHud;
+
+    // leaderboard
+    public int leaderboardBroadcastInterval;
+    public int leaderboardEntries;
+    public int leaderboardOverviewEntries;
+    public java.util.List<LeaderboardCategory> leaderboardBroadcastCategories;
 
     // network (BungeeCord)
     public boolean networkEnabled;
@@ -195,7 +208,7 @@ public final class SoccerSettings {
         autoSaveInterval = c.getInt("settings.auto-save-interval", 300);
 
         minPlayersPerTeam = c.getInt("game.min-players-per-team", 1);
-        maxPlayersPerTeam = c.getInt("game.max-players-per-team", 5);
+        maxPlayersPerTeam = c.getInt("game.max-players-per-team", 11);
         lobbyCountdown = c.getInt("game.lobby-countdown", 15);
         kickoffCountdown = c.getInt("game.kickoff-countdown", 3);
         matchDuration = c.getInt("game.match-duration", 300);
@@ -208,11 +221,18 @@ public final class SoccerSettings {
         quickjoinTeamPick = c.getBoolean("game.quickjoin-team-pick", true);
         botsEnabled = c.getBoolean("bots.enabled", true);
         botMinSoloCount = Math.max(1, c.getInt("bots.min-solo-count", 1));
-        botMaxSoloCount = Math.max(botMinSoloCount, c.getInt("bots.max-solo-count", 5));
+        botMaxSoloCount = Math.max(botMinSoloCount, c.getInt("bots.max-solo-count", 10));
         botDefaultSoloCount = Math.max(botMinSoloCount,
-                Math.min(botMaxSoloCount, c.getInt("bots.default-solo-count", 3)));
+                Math.min(botMaxSoloCount, c.getInt("bots.default-solo-count", 4)));
+        botDefaultTeammateCount = Math.max(0,
+                Math.min(botMaxSoloCount, c.getInt("bots.default-teammate-count", 0)));
         botWalkSpeed = c.getDouble("bots.walk-speed", 0.216);
-        botSprintSpeed = c.getDouble("bots.sprint-speed", 0.281);
+        botSprintSpeed = c.getDouble("bots.sprint-speed", 0.32);
+        botStaminaEnabled = c.getBoolean("bots.stamina-enabled", true);
+        botMaxStamina = c.getDouble("bots.max-stamina", 100.0);
+        botStaminaRegen = c.getDouble("bots.stamina-regen", 0.65);
+        botSprintDrain = c.getDouble("bots.sprint-drain", 0.5);
+        botStaminaRecoverThreshold = c.getDouble("bots.stamina-recover-threshold", 35.0);
         botNames = c.getStringList("bots.names");
         if (botNames.isEmpty()) {
             botNames = java.util.List.of(
@@ -243,6 +263,12 @@ public final class SoccerSettings {
         offsideOpponentRestrainRadius = c.getDouble("game.offside-opponent-restrain-radius", 8.0);
         offsideOpponentMinGap = c.getDouble("game.offside-opponent-min-gap", 3.0);
         broadcastHud = c.getBoolean("game.broadcast-hud", true);
+
+        leaderboardBroadcastInterval = c.getInt("leaderboard.broadcast-interval", 1800);
+        leaderboardEntries = Math.max(1, c.getInt("leaderboard.entries", 10));
+        leaderboardOverviewEntries = Math.max(1, c.getInt("leaderboard.overview-entries", 3));
+        leaderboardBroadcastCategories = parseLeaderboardCategories(
+                c.getStringList("leaderboard.broadcast-categories"));
 
         networkEnabled = c.getBoolean("network.enabled", false);
         networkRole = NetworkRole.fromConfig(c.getString("network.role", "standalone"));
@@ -280,20 +306,20 @@ public final class SoccerSettings {
 
         crowdEnabled = c.getBoolean("crowd.enabled", true);
         crowdVolume = c.getDouble("crowd.volume", 0.85);
-        crowdAmbienceInterval = c.getInt("crowd.ambience-interval-ticks", 8);
+        crowdAmbienceInterval = c.getInt("crowd.ambience-interval-ticks", 70);
         crowdDangerRadius = c.getDouble("crowd.danger-radius", 18.0);
         crowdDangerMinSpeed = c.getDouble("crowd.danger-min-speed", 0.75);
         crowdGoalCelebration = c.getBoolean("crowd.goal-celebration", true);
         crowdReactSaves = c.getBoolean("crowd.react-to-saves", true);
         crowdReactShots = c.getBoolean("crowd.react-to-shots", true);
-        crowdRealSounds = c.getBoolean("crowd.real-sounds", false);
-        crowdPackMode = CrowdPackMode.parse(c.getString("crowd.resource-pack.mode", "manual"));
-        crowdPackAutoServe = c.getBoolean("crowd.resource-pack.auto-serve", false);
+        crowdRealSounds = c.getBoolean("crowd.real-sounds", true);
+        crowdPackMode = CrowdPackMode.parse(c.getString("crowd.resource-pack.mode", "download"));
+        crowdPackAutoServe = c.getBoolean("crowd.resource-pack.auto-serve", true);
         crowdPackPort = c.getInt("crowd.resource-pack.port", 8123);
         crowdPackPublicHost = c.getString("crowd.resource-pack.public-host", "");
         crowdPackUrl = c.getString("crowd.resource-pack.url", "");
         crowdPackUseHash = c.getBoolean("crowd.resource-pack.use-hash", true);
-        crowdPackPromptOnJoin = c.getBoolean("crowd.resource-pack.prompt-on-join", false);
+        crowdPackPromptOnJoin = c.getBoolean("crowd.resource-pack.prompt-on-join", true);
 
         championshipsEnabled = c.getBoolean("championships.enabled", true);
         champMinTeamsToStart = c.getInt("championships.min-teams-to-start", 2);
@@ -363,5 +389,26 @@ public final class SoccerSettings {
         blueName = c.getString("teams.blue.name", "Blue");
         blueColor = c.getString("teams.blue.color", "BLUE");
         blueChatColor = c.getString("teams.blue.chat-color", "&9");
+    }
+
+    private static java.util.List<LeaderboardCategory> parseLeaderboardCategories(
+            java.util.List<String> raw) {
+        java.util.List<LeaderboardCategory> categories = new java.util.ArrayList<>();
+        if (raw == null || raw.isEmpty()) {
+            categories.add(LeaderboardCategory.GOALS);
+            categories.add(LeaderboardCategory.WINS);
+            categories.add(LeaderboardCategory.ASSISTS);
+            return categories;
+        }
+        for (String entry : raw) {
+            LeaderboardCategory category = LeaderboardCategory.parse(entry);
+            if (!categories.contains(category)) {
+                categories.add(category);
+            }
+        }
+        if (categories.isEmpty()) {
+            categories.add(LeaderboardCategory.GOALS);
+        }
+        return categories;
     }
 }

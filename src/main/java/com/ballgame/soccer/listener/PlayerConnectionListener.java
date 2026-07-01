@@ -2,8 +2,10 @@ package com.ballgame.soccer.listener;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.game.Game;
+import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 /**
@@ -16,6 +18,12 @@ public final class PlayerConnectionListener implements Listener {
 
     public PlayerConnectionListener(SoccerPlugin plugin) {
         this.plugin = plugin;
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        Bukkit.getScheduler().runTask(plugin,
+                () -> plugin.games().syncServerViewers());
     }
 
     @EventHandler

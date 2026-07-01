@@ -2,6 +2,7 @@ package com.ballgame.soccer.mechanics;
 
 import com.ballgame.soccer.config.SoccerSettings;
 import com.ballgame.soccer.event.BallKickEvent.KickType;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
@@ -120,6 +121,91 @@ public final class Mechanics {
                     spin.add(liftAxis);
                 }
             }
+        }
+        return new Kick(impulse, spin);
+    }
+
+    public static Kick computeBotPassToward(Location from, Location target, SoccerSettings s,
+                                             double chargeFraction) {
+        Vector flat = flatVector(from, target);
+        if (flat.lengthSquared() < 1.0e-6) {
+            flat = new Vector(0, 0, 1);
+        }
+        flat.normalize();
+        double frac = Math.max(0.0, Math.min(1.0, chargeFraction));
+        double power = (s.lightTouchPower
+                + (s.maxShotPower - s.lightTouchPower) * 0.40 * frac)
+                * s.passPowerMultiplier;
+        return new Kick(flat.clone().multiply(power), new Vector(0, 0, 0));
+    }
+
+    /**
+     * Strike toward a point in the goal mouth using ball-to-target aim (not body
+     * facing), so wide-angle finishes stay on target instead of sailing into touch.
+     */
+    public static Kick computeBotShotToward(Location from, Location target, SoccerSettings s,
+                                            double powerFraction, double verticalLift) {
+        Vector flatLook = flatVector(from, target);
+        if (flatLook.lengthSquared() < 1.0e-6) {
+            flatLook = new Vector(0, 0, 1);
+        }
+        flatLook.normalize();
+
+        double frac = Math.max(0.0, Math.min(1.0, powerFraction));
+        double power = s.lightTouchPower + (s.maxShotPower - s.lightTouchPower) * frac;
+
+        Vector impulse = flatLook.clone().multiply(power);
+        impulse.setY(Math.max(0.0, verticalLift));
+        return new Kick(impulse, new Vector(0, 0, 0));
+    }
+
+    private static Vector flatVector(Location from, Location to) {
+        if (from == null || to == null) {
+            return new Vector();
+        }
+        Vector v = to.toVector().subtract(from.toVector());
+        v.setY(0);
+        return v;
+    }
+
+    /**
+     * A bot shot with explicitly controlled power and launch height. Unlike the
+     * generic {@link #compute} SHOT path (which always lofts and made bots blast
+     * the ball over the bar from close range), this drives the ball along the
+     * flattened aim with only as much lift as the caller asks for, so the AI can
+     * keep close-range efforts low and only loft long-range strikes.
+     *
+     * @param powerFraction 0..1 horizontal drive between light-touch and max power
+     * @param verticalLift  absolute upward launch speed (blocks/tick)
+     */
+    public static Kick computeBotShot(KickActor actor, SoccerSettings s,
+                                      double powerFraction, double verticalLift) {
+        Vector look = actor.getEyeLocation().getDirection();
+        Vector flatLook = new Vector(look.getX(), 0, look.getZ());
+        if (flatLook.lengthSquared() < 1.0e-6) {
+            flatLook = new Vector(0, 0, 1);
+        }
+        flatLook.normalize();
+
+        double frac = Math.max(0.0, Math.min(1.0, powerFraction));
+        double power = s.lightTouchPower + (s.maxShotPower - s.lightTouchPower) * frac;
+
+        Vector impulse = flatLook.clone().multiply(power);
+        impulse.setY(Math.max(0.0, verticalLift));
+
+        // A bot on the move puts a little extra weight behind the strike, but far
+        // less than a charging human so it doesn't sail long.
+        if (actor.isSprinting()) {
+            impulse.add(flatLook.clone().multiply(s.sprintBonus * 0.4));
+        }
+
+        // Slight curve from lateral movement keeps shots looking natural.
+        Vector spin = new Vector(0, 0, 0);
+        Vector move = actor.getVelocity();
+        Vector flatMove = new Vector(move.getX(), 0, move.getZ());
+        if (flatMove.lengthSquared() > 1.0e-4) {
+            double side = flatLook.clone().crossProduct(flatMove).getY();
+            spin.setY(side * s.curveStrength * 0.5);
         }
         return new Kick(impulse, spin);
     }

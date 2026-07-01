@@ -12,6 +12,7 @@ public final class ChampFixture {
     private int scoreB;
     private String winnerTeamId;
     private String nextFixtureId;
+    private String arenaName;
 
     public ChampFixture(String id, int round, String teamAId, String teamBId) {
         this.id = id;
@@ -92,6 +93,14 @@ public final class ChampFixture {
 
     public void setNextFixtureId(String nextFixtureId) {
         this.nextFixtureId = nextFixtureId;
+    }
+
+    public String getArenaName() {
+        return arenaName;
+    }
+
+    public void setArenaName(String arenaName) {
+        this.arenaName = arenaName;
     }
 
     public boolean involvesTeam(String teamId) {

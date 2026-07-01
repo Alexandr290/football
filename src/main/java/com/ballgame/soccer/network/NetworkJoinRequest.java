@@ -20,37 +20,43 @@ public final class NetworkJoinRequest {
     private final QuickJoinMode mode;
     private final TeamSide team;
     private final int botCount;
+    private final int teammateCount;
     private final String arenaName;
 
     private NetworkJoinRequest(UUID playerId, NetworkJoinAction action,
                                QuickJoinMode mode, TeamSide team, int botCount,
-                               String arenaName) {
+                               int teammateCount, String arenaName) {
         this.playerId = playerId;
         this.action = action;
         this.mode = mode;
         this.team = team;
         this.botCount = botCount;
+        this.teammateCount = teammateCount;
         this.arenaName = arenaName;
     }
 
     public static NetworkJoinRequest openModeMenu(UUID playerId) {
         return new NetworkJoinRequest(playerId, NetworkJoinAction.OPEN_MODE_MENU,
-                QuickJoinMode.TEAMS, null, 0, null);
+                QuickJoinMode.TEAMS, null, 0, 0, null);
     }
 
     public static NetworkJoinRequest joinTeams(UUID playerId, TeamSide team) {
         return new NetworkJoinRequest(playerId, NetworkJoinAction.JOIN,
-                QuickJoinMode.TEAMS, team, 0, null);
+                QuickJoinMode.TEAMS, team, 0, 0, null);
     }
 
     public static NetworkJoinRequest joinSolo(UUID playerId, TeamSide team, int botCount) {
+        return joinSolo(playerId, team, botCount, 0);
+    }
+
+    public static NetworkJoinRequest joinSolo(UUID playerId, TeamSide team, int botCount, int teammateCount) {
         return new NetworkJoinRequest(playerId, NetworkJoinAction.JOIN,
-                QuickJoinMode.SOLO, team, botCount, null);
+                QuickJoinMode.SOLO, team, botCount, teammateCount, null);
     }
 
     public static NetworkJoinRequest joinArena(UUID playerId, String arenaName, TeamSide team) {
         return new NetworkJoinRequest(playerId, NetworkJoinAction.JOIN_ARENA,
-                QuickJoinMode.TEAMS, team, 0, arenaName);
+                QuickJoinMode.TEAMS, team, 0, 0, arenaName);
     }
 
     public UUID playerId() {
@@ -73,6 +79,10 @@ public final class NetworkJoinRequest {
         return botCount;
     }
 
+    public int teammateCount() {
+        return teammateCount;
+    }
+
     public String arenaName() {
         return arenaName;
     }
@@ -86,6 +96,7 @@ public final class NetworkJoinRequest {
         out.writeUTF(team != null ? team.name() : "");
         out.writeInt(botCount);
         out.writeUTF(arenaName != null ? arenaName : "");
+        out.writeInt(teammateCount);
         return bytes.toByteArray();
     }
 
@@ -99,6 +110,7 @@ public final class NetworkJoinRequest {
         int botCount = in.readInt();
         String arenaRaw = in.available() > 0 ? in.readUTF() : "";
         String arenaName = arenaRaw.isEmpty() ? null : arenaRaw;
-        return new NetworkJoinRequest(playerId, action, mode, team, botCount, arenaName);
+        int teammateCount = in.available() > 0 ? in.readInt() : 0;
+        return new NetworkJoinRequest(playerId, action, mode, team, botCount, teammateCount, arenaName);
     }
 }

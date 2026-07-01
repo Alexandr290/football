@@ -11,8 +11,8 @@ import org.bukkit.util.Vector;
 final class BotMovement {
 
     private static final double WALK_BLOCKS_PER_TICK = 0.216;
-    private static final double SPRINT_BLOCKS_PER_TICK = 0.281;
-    private static final double ACCEL_PER_TICK = 0.038;
+    private static final double SPRINT_BLOCKS_PER_TICK = 0.32;
+    private static final double ACCEL_PER_TICK = 0.046;
     private static final double DECEL_PER_TICK = 0.055;
     private static final double MAX_TURN_DEG_WALK = 42.0;
     private static final double MAX_TURN_DEG_SPRINT = 34.0;
@@ -35,8 +35,13 @@ final class BotMovement {
 
     /**
      * Advances {@code actor} toward {@code target} and returns the new flat velocity.
+     *
+     * @param speedMul per-bot top-speed multiplier (pace + fatigue)
+     * @param accelMul per-bot acceleration/braking multiplier
+     * @param agility  per-bot turning sharpness multiplier
      */
-    Result advance(MatchBot actor, Location target, boolean sprint, SoccerSettings settings) {
+    Result advance(MatchBot actor, Location target, boolean sprint, SoccerSettings settings,
+                   double speedMul, double accelMul, double agility) {
         Location location = actor.getLocation();
         if (location == null || target == null) {
             return Result.stopped(new Vector(0, 0, 0), false);
@@ -46,8 +51,16 @@ final class BotMovement {
         toTarget.setY(0);
         double dist = toTarget.length();
         if (dist < 0.06) {
-            speed = 0.0;
-            return Result.stopped(new Vector(0, 0, 0), false);
+            // Glide to a halt rather than snapping dead — preserves footwork feel.
+            speed = Math.max(0.0, speed - DECEL_PER_TICK * accelMul);
+            if (speed < 1.0e-3) {
+                speed = 0.0;
+                return Result.stopped(new Vector(0, 0, 0), false);
+            }
+            Vector coast = heading.clone().multiply(speed);
+            location.add(coast);
+            location.setPitch(0f);
+            return new Result(coast, false, location.getYaw());
         }
 
         Vector desired = toTarget.clone().multiply(1.0 / dist);
@@ -55,23 +68,33 @@ final class BotMovement {
             heading = directionFromYaw(location.getYaw());
         }
 
-        double maxSpeed = sprint ? configuredSprintSpeed(settings) : configuredWalkSpeed(settings);
+        double walk = configuredWalkSpeed(settings) * Math.max(0.4, speedMul);
+        double run = configuredSprintSpeed(settings) * Math.max(0.4, speedMul);
+        double maxSpeed = sprint ? run : walk;
         double desiredSpeed = maxSpeed;
+        // Ease off the throttle when approaching the target so the bot arrives
+        // under control instead of overshooting and oscillating.
         if (dist < maxSpeed * 2.8) {
             desiredSpeed = Math.max(maxSpeed * 0.42, dist * 0.72);
         }
 
         double turnAngle = angleBetween(heading, desired);
-        double maxTurn = sprint ? MAX_TURN_DEG_SPRINT : MAX_TURN_DEG_WALK;
+        double maxTurn = (sprint ? MAX_TURN_DEG_SPRINT : MAX_TURN_DEG_WALK) * Math.max(0.5, agility);
         heading = rotateToward(heading, desired, maxTurn);
-        if (turnAngle > 18.0) {
+        // Hard cuts scrub speed — you can't turn at full pace.
+        if (turnAngle > 60.0) {
+            desiredSpeed *= TURN_SPEED_PENALTY * 0.8;
+        } else if (turnAngle > 18.0) {
             desiredSpeed *= TURN_SPEED_PENALTY;
         }
 
+        double sprintBurst = sprint ? 1.18 : 1.0;
+        double accel = ACCEL_PER_TICK * Math.max(0.4, accelMul) * sprintBurst;
+        double decel = DECEL_PER_TICK * Math.max(0.4, accelMul);
         if (speed < desiredSpeed) {
-            speed = Math.min(desiredSpeed, speed + ACCEL_PER_TICK);
+            speed = Math.min(desiredSpeed, speed + accel);
         } else {
-            speed = Math.max(desiredSpeed, speed - DECEL_PER_TICK);
+            speed = Math.max(desiredSpeed, speed - decel);
         }
 
         Vector velocity = heading.clone().multiply(speed);
@@ -80,7 +103,7 @@ final class BotMovement {
         location.setYaw(yaw);
         location.setPitch(0f);
 
-        boolean sprinting = sprint && speed > configuredWalkSpeed(settings) * 0.82 && dist > 1.0;
+        boolean sprinting = sprint && speed > walk * 0.9 && dist > 1.0;
         return new Result(velocity, sprinting, yaw);
     }
 

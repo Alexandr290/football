@@ -14,8 +14,8 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Stadium crowd shouts using vanilla mob voice sounds (no resource pack).
- * Volume follows ball position: midfield — medium, near goal — loud, goal — max.
+ * Stadium crowd shouts using non-animal vanilla sounds when the real resource pack
+ * is not available. Volume follows ball position: midfield, attack, danger, goal.
  */
 public final class VanillaNpcCrowd {
 
@@ -29,26 +29,20 @@ public final class VanillaNpcCrowd {
     public static final float VOL_GOAL = 1.0f;
 
     private static final Sound[] SHOUTS = {
-            Sound.ENTITY_VILLAGER_YES,
-            Sound.ENTITY_VILLAGER_NO,
-            Sound.ENTITY_VILLAGER_CELEBRATE,
-            Sound.ENTITY_PILLAGER_AMBIENT,
-            Sound.ENTITY_PILLAGER_CELEBRATE,
-            Sound.ENTITY_GOAT_SCREAMING_AMBIENT,
-            Sound.ENTITY_GOAT_SCREAMING_HURT,
-            Sound.ENTITY_RAVAGER_CELEBRATE,
-            Sound.ENTITY_RAVAGER_ROAR,
-            Sound.ENTITY_WITCH_CELEBRATE,
+            Sound.BLOCK_NOTE_BLOCK_HAT,
+            Sound.BLOCK_NOTE_BLOCK_PLING,
+            Sound.BLOCK_NOTE_BLOCK_BASS,
+            Sound.BLOCK_NOTE_BLOCK_BELL,
+            Sound.UI_TOAST_CHALLENGE_COMPLETE,
+            Sound.ENTITY_PLAYER_LEVELUP,
     };
 
     private static final Sound[] GOAL_SHOUTS = {
-            Sound.ENTITY_RAVAGER_CELEBRATE,
-            Sound.ENTITY_RAVAGER_ROAR,
-            Sound.ENTITY_PILLAGER_CELEBRATE,
-            Sound.ENTITY_GOAT_SCREAMING_HURT,
-            Sound.ENTITY_GOAT_SCREAMING_AMBIENT,
-            Sound.ENTITY_VILLAGER_CELEBRATE,
-            Sound.ENTITY_WITCH_CELEBRATE,
+            Sound.UI_TOAST_CHALLENGE_COMPLETE,
+            Sound.ENTITY_PLAYER_LEVELUP,
+            Sound.BLOCK_NOTE_BLOCK_PLING,
+            Sound.BLOCK_NOTE_BLOCK_BELL,
+            Sound.BLOCK_NOTE_BLOCK_HAT,
     };
 
     private VanillaNpcCrowd() {
@@ -92,7 +86,7 @@ public final class VanillaNpcCrowd {
     }
 
     public static int shoutIntervalTicks(double attackFactor) {
-        return (int) Math.max(10, 48 - attackFactor * 34);
+        return (int) Math.max(8, 44 - attackFactor * 30);
     }
 
     public static void playShout(Player player, List<Location> stands, float volume, double crowdVolumeScale) {

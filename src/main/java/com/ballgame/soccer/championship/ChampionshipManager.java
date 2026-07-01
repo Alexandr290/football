@@ -4,6 +4,7 @@ import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
 import com.ballgame.soccer.config.Messages;
 import com.ballgame.soccer.game.Game;
+import com.ballgame.soccer.game.GameState;
 import com.ballgame.soccer.game.TeamSide;
 import com.ballgame.soccer.gui.ChampMenus;
 import org.bukkit.Bukkit;
@@ -181,12 +182,17 @@ public final class ChampionshipManager {
         if (!canJoinTeam(championship)) {
             return false;
         }
-        if (championship.findTeamOf(player.getUniqueId()) != null) {
+        ChampTeam team = championship.getTeam(teamId);
+        if (team == null || team.isEliminated()
+                || team.size() >= plugin.settings().maxPlayersPerTeam) {
             return false;
         }
-        ChampTeam team = championship.getTeam(teamId);
-        if (team == null || team.size() >= plugin.settings().maxPlayersPerTeam) {
-            return false;
+        ChampTeam current = championship.findTeamOf(player.getUniqueId());
+        if (current != null) {
+            if (current.getId().equals(teamId)) {
+                return false;
+            }
+            removeMemberFromTeam(current, player.getUniqueId());
         }
         team.addMember(player.getUniqueId());
         if (team.getCaptain() == null) {
@@ -200,22 +206,16 @@ public final class ChampionshipManager {
         if (championship == null || championship.getState() == ChampionshipState.FINISHED) {
             return false;
         }
-        if (championship.isRegistrationOpen()) {
-            return true;
-        }
-        return championship.getType() == ChampionshipType.KNOCKOUT
-                && championship.getState() == ChampionshipState.ACTIVE;
+        return championship.getState() == ChampionshipState.REGISTRATION
+                || championship.getState() == ChampionshipState.ACTIVE;
     }
 
     public boolean canJoinTeam(Championship championship) {
         if (championship == null || championship.getState() == ChampionshipState.FINISHED) {
             return false;
         }
-        if (championship.isRegistrationOpen()) {
-            return true;
-        }
-        return championship.getType() == ChampionshipType.KNOCKOUT
-                && championship.getState() == ChampionshipState.ACTIVE;
+        return championship.getState() == ChampionshipState.REGISTRATION
+                || championship.getState() == ChampionshipState.ACTIVE;
     }
 
     public boolean canJoinFixture(Championship championship, ChampFixture fixture) {
@@ -229,6 +229,64 @@ public final class ChampionshipManager {
         return true;
     }
 
+    /**
+     * Whether {@code playerId} may enter this fixture right now: they must belong
+     * to one of the two scheduled teams, the fixture must not be finished, and
+     * the in-game lobby must still be open (not kicked off yet).
+     */
+    public boolean canPlayerJoinFixture(Championship championship, ChampFixture fixture, UUID playerId) {
+        if (championship == null || fixture == null || playerId == null) {
+            return false;
+        }
+        if (fixture.getState() == FixtureState.COMPLETED) {
+            return false;
+        }
+        if (!fixture.involvesPlayer(championship, playerId)) {
+            return false;
+        }
+        if (!canJoinFixture(championship, fixture)) {
+            return false;
+        }
+        if (fixture.getState() == FixtureState.LIVE) {
+            return false;
+        }
+        Game game = plugin.games().findGameByFixture(championship.getId(), fixture.getId());
+        if (game != null && !game.isEnded()) {
+            GameState state = game.getState();
+            return state == GameState.WAITING || state == GameState.COUNTDOWN;
+        }
+        return fixture.getState() == FixtureState.PENDING;
+    }
+
+    /** Fixtures this player can still enter (lobby open, their team is playing). */
+    public List<ChampFixture> joinableFixturesFor(Championship championship, UUID playerId) {
+        List<ChampFixture> list = new ArrayList<>();
+        if (championship == null || playerId == null) {
+            return list;
+        }
+        for (ChampFixture fixture : championship.getFixtures()) {
+            if (canPlayerJoinFixture(championship, fixture, playerId)) {
+                list.add(fixture);
+            }
+        }
+        return list;
+    }
+
+    /** Called when a championship match actually kicks off — not when the first player enters the lobby. */
+    public void onMatchStarted(Game game) {
+        String champId = game.getChampionshipId();
+        String fixtureId = game.getFixtureId();
+        if (champId == null || fixtureId == null) {
+            return;
+        }
+        Championship championship = get(champId);
+        ChampFixture fixture = championship != null ? championship.getFixture(fixtureId) : null;
+        if (fixture != null && fixture.getState() != FixtureState.COMPLETED) {
+            fixture.setState(FixtureState.LIVE);
+            save();
+        }
+    }
+
     public boolean leaveTeam(Championship championship, Player player) {
         if (!canLeaveTeam(championship)) {
             return false;
@@ -237,16 +295,20 @@ public final class ChampionshipManager {
         if (team == null) {
             return false;
         }
-        team.removeMember(player.getUniqueId());
-        if (team.getCaptain() != null && player.getUniqueId().equals(team.getCaptain())) {
+        removeMemberFromTeam(team, player.getUniqueId());
+        save();
+        return true;
+    }
+
+    private void removeMemberFromTeam(ChampTeam team, UUID playerId) {
+        team.removeMember(playerId);
+        if (team.getCaptain() != null && playerId.equals(team.getCaptain())) {
             if (team.size() > 0) {
                 team.setCaptain(team.getMembers().get(0));
             } else {
                 team.setCaptain(null);
             }
         }
-        save();
-        return true;
     }
 
     public boolean startChampionship(String id) {
@@ -584,6 +646,13 @@ public final class ChampionshipManager {
     public ScheduleMatchResult scheduleMatch(Championship championship,
                                              String teamAId, String teamBId,
                                              ChampFixture[] outFixture) {
+        return scheduleMatch(championship, teamAId, teamBId, null, outFixture);
+    }
+
+    public ScheduleMatchResult scheduleMatch(Championship championship,
+                                             String teamAId, String teamBId,
+                                             String arenaName,
+                                             ChampFixture[] outFixture) {
         if (outFixture == null || outFixture.length == 0) {
             return ScheduleMatchResult.FAILED;
         }
@@ -604,19 +673,25 @@ public final class ChampionshipManager {
         }
         ChampFixture existing = findFixtureBetween(championship, teamAId, teamBId);
         if (existing != null) {
+            if (arenaName != null && !arenaName.isEmpty()) {
+                existing.setArenaName(arenaName);
+                save();
+            }
             outFixture[0] = existing;
             return ScheduleMatchResult.ALREADY_EXISTS;
         }
         int round = championship.getState() == ChampionshipState.REGISTRATION ? 0 : 1;
         String id = "f" + (++leagueFixtureSeq);
         ChampFixture fixture = new ChampFixture(id, round, teamAId, teamBId);
+        if (arenaName != null && !arenaName.isEmpty()) {
+            fixture.setArenaName(arenaName);
+        }
         championship.addFixture(fixture);
         outFixture[0] = fixture;
         if (championship.getType() == ChampionshipType.KNOCKOUT) {
             syncWorldCupGroupsFromFixtures(championship);
-        } else {
-            save();
         }
+        save();
         return ScheduleMatchResult.CREATED;
     }
 
@@ -1037,34 +1112,55 @@ public final class ChampionshipManager {
                 && championship.getState() != ChampionshipState.REGISTRATION) {
             return false;
         }
-        if (!canJoinFixture(championship, fixture)) {
-            if (isWorldCupGroupFixture(championship, fixture)
-                    && !isWorldCupGroupCalendarComplete(championship)) {
-                plugin.messages().send(player, "champ-wc-need-scheduled",
-                        "count", String.valueOf(countWorldCupGroupFixtures(championship)),
-                        "required", String.valueOf(worldCupRequiredGroupMatches()));
+
+        if (!fixture.involvesPlayer(championship, player.getUniqueId())) {
+            plugin.messages().send(player, "champ-fixture-wrong-team",
+                    "team_a", fixture.sideADisplay(championship),
+                    "team_b", fixture.sideBDisplay(championship));
+            return false;
+        }
+
+        if (!canPlayerJoinFixture(championship, fixture, player.getUniqueId())) {
+            if (fixture.getState() == FixtureState.LIVE) {
+                plugin.messages().send(player, "match-already-started");
+            } else if (!canJoinFixture(championship, fixture)) {
+                if (isWorldCupGroupFixture(championship, fixture)
+                        && !isWorldCupGroupCalendarComplete(championship)) {
+                    plugin.messages().send(player, "champ-wc-need-scheduled",
+                            "count", String.valueOf(countWorldCupGroupFixtures(championship)),
+                            "required", String.valueOf(worldCupRequiredGroupMatches()));
+                } else {
+                    plugin.messages().send(player, "champ-wc-teams-not-ready");
+                }
             } else {
-                plugin.messages().send(player, "champ-wc-teams-not-ready");
+                plugin.messages().send(player, "match-already-started");
             }
             return false;
         }
 
         TeamSide side = resolveFixtureSide(player, championship, fixture);
         if (side == null || !fixture.hasBothSides()) {
+            plugin.messages().send(player, "champ-fixture-wrong-team",
+                    "team_a", fixture.sideADisplay(championship),
+                    "team_b", fixture.sideBDisplay(championship));
             return false;
         }
-        Arena arena = plugin.arenas().get(championship.getArenaName());
+        String arenaName = resolveFixtureArenaName(championship, fixture);
+        Arena arena = plugin.arenas().get(arenaName);
         if (arena == null || !arena.isPlayable()) {
             plugin.messages().send(player, "arena-not-ready");
             return false;
         }
-        if (fixture.getState() == FixtureState.PENDING) {
-            fixture.setState(FixtureState.LIVE);
-            save();
-        }
         return plugin.games().joinChampionship(
                 player, arena, side, championship.getId(), fixture.getId(),
                 fixture.sideADisplay(championship), fixture.sideBDisplay(championship));
+    }
+
+    public String resolveFixtureArenaName(Championship championship, ChampFixture fixture) {
+        if (fixture != null && fixture.getArenaName() != null && !fixture.getArenaName().isEmpty()) {
+            return fixture.getArenaName();
+        }
+        return championship != null ? championship.getArenaName() : null;
     }
 
     private TeamSide resolveFixtureSide(Player player, Championship championship, ChampFixture fixture) {
@@ -1082,6 +1178,20 @@ public final class ChampionshipManager {
             }
         }
         return null;
+    }
+
+    /** Ensures the player is registered on the championship team mapped to {@code side}. */
+    public boolean verifyPlayerOnFixtureSide(Player player, String championshipId,
+                                             String fixtureId, TeamSide side) {
+        if (player == null || side == null || championshipId == null || fixtureId == null) {
+            return false;
+        }
+        Championship championship = get(championshipId);
+        ChampFixture fixture = championship != null ? championship.getFixture(fixtureId) : null;
+        if (championship == null || fixture == null) {
+            return false;
+        }
+        return side == resolveFixtureSide(player, championship, fixture);
     }
 
     public void openMainMenu(Player player) {
@@ -1188,6 +1298,7 @@ public final class ChampionshipManager {
                 fixture.setScores(f.getInt("score-a", 0), f.getInt("score-b", 0));
                 fixture.setWinnerTeamId(f.getString("winner"));
                 fixture.setNextFixtureId(f.getString("next"));
+                fixture.setArenaName(f.getString("arena"));
                 championship.addFixture(fixture);
             }
         }
@@ -1250,6 +1361,9 @@ public final class ChampionshipManager {
             f.set("score-b", fixture.getScoreB());
             f.set("winner", fixture.getWinnerTeamId());
             f.set("next", fixture.getNextFixtureId());
+            if (fixture.getArenaName() != null && !fixture.getArenaName().isEmpty()) {
+                f.set("arena", fixture.getArenaName());
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
 import com.ballgame.soccer.config.Messages;
 import com.ballgame.soccer.config.SoccerSettings;
+import com.ballgame.soccer.game.BotDifficulty;
 import com.ballgame.soccer.game.Game;
 import com.ballgame.soccer.game.QuickJoinMode;
 import com.ballgame.soccer.game.TeamSide;
@@ -21,23 +22,47 @@ public final class QuickJoinMenu extends AbstractMenu {
     private final Game game;
     private final QuickJoinMode mode;
     private final int botCount;
+    private final int teammateCount;
+    private final BotDifficulty redDifficulty;
+    private final BotDifficulty blueDifficulty;
 
     private QuickJoinMenu(SoccerPlugin plugin, Player viewer, Arena arena, Game game,
-                          QuickJoinMode mode, int botCount) {
+                          QuickJoinMode mode, int botCount, int teammateCount,
+                          BotDifficulty redDifficulty, BotDifficulty blueDifficulty) {
         super(plugin, viewer, plugin.messages().raw("quickjoin-gui-title"), 3);
         this.arena = arena;
         this.game = game;
         this.mode = mode;
         this.botCount = botCount;
+        this.teammateCount = teammateCount;
+        this.redDifficulty = redDifficulty != null ? redDifficulty : BotDifficulty.MEDIUM;
+        this.blueDifficulty = blueDifficulty != null ? blueDifficulty : BotDifficulty.MEDIUM;
     }
 
     public static void open(SoccerPlugin plugin, Player player, Arena arena, Game game) {
-        open(plugin, player, arena, game, QuickJoinMode.TEAMS, 0);
+        open(plugin, player, arena, game, QuickJoinMode.TEAMS, 0, 0, BotDifficulty.MEDIUM);
     }
 
     public static void open(SoccerPlugin plugin, Player player, Arena arena, Game game,
                             QuickJoinMode mode, int botCount) {
-        new QuickJoinMenu(plugin, player, arena, game, mode, botCount).open();
+        open(plugin, player, arena, game, mode, botCount, 0, BotDifficulty.MEDIUM);
+    }
+
+    public static void open(SoccerPlugin plugin, Player player, Arena arena, Game game,
+                            QuickJoinMode mode, int botCount, int teammateCount) {
+        open(plugin, player, arena, game, mode, botCount, teammateCount, BotDifficulty.MEDIUM);
+    }
+
+    public static void open(SoccerPlugin plugin, Player player, Arena arena, Game game,
+                            QuickJoinMode mode, int botCount, int teammateCount, BotDifficulty difficulty) {
+        open(plugin, player, arena, game, mode, botCount, teammateCount, difficulty, difficulty);
+    }
+
+    public static void open(SoccerPlugin plugin, Player player, Arena arena, Game game,
+                            QuickJoinMode mode, int botCount, int teammateCount,
+                            BotDifficulty redDifficulty, BotDifficulty blueDifficulty) {
+        new QuickJoinMenu(plugin, player, arena, game, mode, botCount, teammateCount,
+                redDifficulty, blueDifficulty).open();
     }
 
     @Override
@@ -57,7 +82,15 @@ public final class QuickJoinMenu extends AbstractMenu {
                 msg.format("quickjoin-gui-players", "count", String.valueOf(redCount + blueCount)),
                 mode == QuickJoinMode.SOLO
                         ? msg.format("quickjoin-gui-solo-bots", "count", String.valueOf(botCount))
-                        : msg.raw("quickjoin-gui-teams-mode")));
+                        : msg.raw("quickjoin-gui-teams-mode"),
+                mode == QuickJoinMode.SOLO
+                        ? msg.format("quickjoin-solo-red-difficulty",
+                        "difficulty", msg.raw(redDifficulty.langKey()))
+                        : "",
+                mode == QuickJoinMode.SOLO
+                        ? msg.format("quickjoin-solo-blue-difficulty",
+                        "difficulty", msg.raw(blueDifficulty.langKey()))
+                        : ""));
 
         renderTeamSlot(11, TeamSide.RED, settings.redName, settings.redChatColor,
                 redCount, settings.maxPlayersPerTeam);
@@ -65,7 +98,8 @@ public final class QuickJoinMenu extends AbstractMenu {
                 blueCount, settings.maxPlayersPerTeam);
 
         if (mode == QuickJoinMode.SOLO) {
-            backButton(22, () -> QuickJoinSoloMenu.open(plugin, viewer, botCount));
+            backButton(22, () -> QuickJoinSoloMenu.open(plugin, viewer,
+                    botCount, teammateCount, redDifficulty, blueDifficulty));
         } else {
             backButton(22, () -> QuickJoinModeMenu.open(plugin, viewer));
         }
@@ -97,7 +131,8 @@ public final class QuickJoinMenu extends AbstractMenu {
             return;
         }
         boolean joined = mode == QuickJoinMode.SOLO
-                ? plugin.games().joinSolo(viewer, arena, side, botCount)
+                ? plugin.games().joinSolo(viewer, arena, side, botCount, teammateCount,
+                redDifficulty, blueDifficulty)
                 : plugin.games().join(viewer, arena, side);
         if (joined) {
             viewer.closeInventory();

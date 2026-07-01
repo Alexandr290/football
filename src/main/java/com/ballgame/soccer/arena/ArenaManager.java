@@ -31,6 +31,10 @@ public final class ArenaManager {
     }
 
     public void load() {
+        load(true);
+    }
+
+    private void load(boolean scheduleLateWorldRetry) {
         arenas.clear();
         if (!file.exists()) {
             return;
@@ -40,6 +44,7 @@ public final class ArenaManager {
         if (root == null) {
             return;
         }
+        boolean retryForLateWorlds = false;
         for (String key : root.getKeys(false)) {
             ConfigurationSection section = root.getConfigurationSection(key);
             if (section == null) {
@@ -48,11 +53,46 @@ public final class ArenaManager {
             try {
                 Arena arena = Arena.load(key, section);
                 arenas.put(key.toLowerCase(Locale.ROOT), arena);
+                if (!arena.isSetupComplete() && hasCompleteSetupSections(section)) {
+                    retryForLateWorlds = true;
+                }
             } catch (Exception ex) {
                 plugin.getLogger().log(Level.WARNING, "Failed to load arena '" + key + "'", ex);
             }
         }
         plugin.getLogger().info("Loaded " + arenas.size() + " arena(s).");
+        if (scheduleLateWorldRetry && retryForLateWorlds) {
+            plugin.getServer().getScheduler().runTaskLater(plugin, this::reloadAfterWorlds, 40L);
+        }
+    }
+
+    private void reloadAfterWorlds() {
+        int beforePlayable = playableCount();
+        load(false);
+        int afterPlayable = playableCount();
+        if (afterPlayable > beforePlayable) {
+            plugin.getLogger().info("Recovered " + (afterPlayable - beforePlayable)
+                    + " arena(s) after worlds finished loading.");
+        }
+    }
+
+    private int playableCount() {
+        int count = 0;
+        for (Arena arena : arenas.values()) {
+            if (arena.isPlayable()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean hasCompleteSetupSections(ConfigurationSection section) {
+        return section.isConfigurationSection("field")
+                && section.isConfigurationSection("red-goal")
+                && section.isConfigurationSection("blue-goal")
+                && section.isConfigurationSection("ball-spawn")
+                && section.isConfigurationSection("red-spawn")
+                && section.isConfigurationSection("blue-spawn");
     }
 
     public void save() {

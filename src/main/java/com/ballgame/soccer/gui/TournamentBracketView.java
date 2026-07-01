@@ -189,10 +189,8 @@ public final class TournamentBracketView {
                                              int slot, BiConsumer<Integer, Runnable> clickRegistrar,
                                              boolean calendarReady) {
         boolean fixtureReady = plugin.championships().canJoinFixture(championship, fixture);
-        boolean involves = fixture.involvesPlayer(championship, viewer.getUniqueId());
-        boolean clickable = fixtureReady && involves
-                && (fixture.getState() == FixtureState.PENDING
-                || fixture.getState() == FixtureState.LIVE);
+        boolean clickable = plugin.championships()
+                .canPlayerJoinFixture(championship, fixture, viewer.getUniqueId());
 
         Material mat = Material.GRAY_CONCRETE;
         if (fixture.getState() == FixtureState.LIVE) {
@@ -230,7 +228,8 @@ public final class TournamentBracketView {
             final ChampFixture selected = fixture;
             clickRegistrar.accept(slot, () -> {
                 if (plugin.championships().joinFixtureMatch(viewer, championship, selected)) {
-                    msg.send(viewer, "champ-joined-match", "arena", championship.getArenaName());
+                    msg.send(viewer, "champ-joined-match", "arena",
+                            plugin.championships().resolveFixtureArenaName(championship, selected));
                     viewer.closeInventory();
                 } else {
                     msg.send(viewer, "champ-join-failed");
@@ -434,10 +433,8 @@ public final class TournamentBracketView {
                                      Player viewer, Inventory inventory, ChampFixture fixture, int slot,
                                      BiConsumer<Integer, Runnable> clickRegistrar) {
         boolean teamsReady = plugin.championships().canJoinFixture(championship, fixture);
-        boolean involves = fixture.involvesPlayer(championship, viewer.getUniqueId());
-        boolean clickable = teamsReady && involves
-                && (fixture.getState() == FixtureState.PENDING
-                || fixture.getState() == FixtureState.LIVE);
+        boolean clickable = plugin.championships()
+                .canPlayerJoinFixture(championship, fixture, viewer.getUniqueId());
 
         inventory.setItem(slot, buildMatchCard(plugin, msg, championship, fixture, viewer, teamsReady));
 
@@ -445,7 +442,8 @@ public final class TournamentBracketView {
             final ChampFixture selected = fixture;
             clickRegistrar.accept(slot, () -> {
                 if (plugin.championships().joinFixtureMatch(viewer, championship, selected)) {
-                    msg.send(viewer, "champ-joined-match", "arena", championship.getArenaName());
+                    msg.send(viewer, "champ-joined-match", "arena",
+                            plugin.championships().resolveFixtureArenaName(championship, selected));
                     viewer.closeInventory();
                 } else {
                     msg.send(viewer, "champ-join-failed");

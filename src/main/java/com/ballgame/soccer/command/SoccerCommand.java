@@ -2,12 +2,16 @@ package com.ballgame.soccer.command;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
+import com.ballgame.soccer.arena.TouchlineSegment;
+import com.ballgame.soccer.ball.BallOrphanCleanup;
 import com.ballgame.soccer.championship.Championship;
 import com.ballgame.soccer.championship.ChampionshipType;
 import com.ballgame.soccer.championship.ChampTeam;
 import com.ballgame.soccer.crowd.CrowdPackMode;
 import com.ballgame.soccer.game.Game;
 import com.ballgame.soccer.game.TeamSide;
+import com.ballgame.soccer.stats.ChatLeaderboard;
+import com.ballgame.soccer.stats.LeaderboardCategory;
 import com.ballgame.soccer.stats.PlayerStats;
 import com.ballgame.soccer.util.Cuboid;
 import com.ballgame.soccer.util.Text;
@@ -28,7 +32,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.ToIntFunction;
 
 /**
  * Single-entry command dispatcher for {@code /soccer}. Handles both player-facing
@@ -40,11 +43,12 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
     private final Map<UUID, Location[]> selections = new HashMap<>();
 
     private static final List<String> PLAYER_SUBS = Arrays.asList(
-            "join", "quickjoin", "leave", "list", "stats", "top", "cup", "championship", "crowdpack", "help");
+            "join", "quickjoin", "leave", "list", "stats", "top", "leaderboard", "cup", "championship", "crowdpack", "help");
     private static final List<String> ADMIN_SUBS = Arrays.asList(
             "create", "delete", "pos1", "pos2", "setfield", "setredgoal", "setbluegoal",
             "setballspawn", "setredspawn", "setbluespawn", "setlobby", "setspectator",
-            "enable", "disable", "start", "stop", "reload", "crowdpack",
+            "enable", "disable", "start", "stop", "reload", "cleanup", "resetstats",
+            "addoutline", "clearoutlines", "listoutlines", "crowdpack",
             "cupcreate", "cupdelete", "cupstart", "cuprename", "teamrename");
 
     public SoccerCommand(SoccerPlugin plugin) {
@@ -65,6 +69,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             case "list":        return list(sender);
             case "stats":       return stats(sender, args);
             case "top":         return top(sender, args);
+            case "leaderboard": return leaderboard(sender, args);
             case "cup":
             case "championship": return openChampionshipGui(sender);
             case "crowdpack":   return crowdPack(sender, args);
@@ -94,6 +99,11 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             case "start":       return adminStart(sender, args);
             case "stop":        return adminStop(sender, args);
             case "reload":      return reload(sender);
+            case "cleanup":     return cleanup(sender, args);
+            case "resetstats":  return resetStats(sender, args);
+            case "addoutline":  return addOutLine(sender, args);
+            case "clearoutlines": return clearOutLines(sender, args);
+            case "listoutlines": return listOutLines(sender, args);
             default:
                 help(sender);
                 return true;
@@ -220,29 +230,117 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean top(CommandSender sender, String[] args) {
-        String category = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "goals";
-        ToIntFunction<PlayerStats> key;
-        switch (category) {
-            case "wins":    key = PlayerStats::getWins; break;
-            case "assists": key = PlayerStats::getAssists; break;
-            case "tackles": key = PlayerStats::getTackles; break;
-            case "saves":   key = PlayerStats::getSaves; break;
-            case "goals":
-            default:        key = PlayerStats::getGoals; category = "goals"; break;
-        }
-        List<PlayerStats> top = plugin.stats().leaderboard(key, 10);
-        plugin.messages().sendRaw(sender, "&a&lTop 10 - " + category);
-        if (top.isEmpty()) {
-            plugin.messages().sendRaw(sender, "&7  (no data yet)");
+        if (args.length >= 2 && args[1].equalsIgnoreCase("all")) {
+            ChatLeaderboard.sendOverview(sender, plugin, plugin.settings().leaderboardOverviewEntries);
             return true;
         }
-        int rank = 1;
-        for (PlayerStats s : top) {
-            sender.sendMessage(Text.color("&e#" + rank + " &f" + s.getName()
-                    + " &7- &a" + key.applyAsInt(s)));
-            rank++;
+        LeaderboardCategory category = args.length >= 2
+                ? LeaderboardCategory.parse(args[1])
+                : LeaderboardCategory.GOALS;
+        ChatLeaderboard.sendCategory(sender, plugin, category, plugin.settings().leaderboardEntries);
+        return true;
+    }
+
+    private boolean leaderboard(CommandSender sender, String[] args) {
+        if (args.length <= 1 || args[1].equalsIgnoreCase("all")) {
+            ChatLeaderboard.sendOverview(sender, plugin, plugin.settings().leaderboardOverviewEntries);
+            return true;
+        }
+        LeaderboardCategory category = LeaderboardCategory.parse(args[1]);
+        ChatLeaderboard.sendCategory(sender, plugin, category, plugin.settings().leaderboardEntries);
+        return true;
+    }
+
+    private boolean resetStats(CommandSender sender, String[] args) {
+        if (notAdmin(sender)) {
+            return true;
+        }
+        if (args.length < 2) {
+            plugin.messages().send(sender, "stats-reset-usage");
+            return true;
+        }
+        if (args[1].equalsIgnoreCase("all")) {
+            int count = plugin.stats().resetAll();
+            plugin.messages().send(sender, "stats-reset-all", "count", String.valueOf(count));
+            return true;
+        }
+        OfflinePlayer target = Bukkit.getOfflinePlayer(args[1]);
+        if (!plugin.stats().reset(target.getUniqueId())) {
+            plugin.messages().send(sender, "stats-reset-not-found", "player", target.getName());
+            return true;
+        }
+        plugin.messages().send(sender, "stats-reset-player", "player", target.getName());
+        return true;
+    }
+
+    private boolean addOutLine(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender, "soccer.admin");
+        if (player == null) {
+            return true;
+        }
+        Arena arena = requireArena(sender, args);
+        if (arena == null) {
+            return true;
+        }
+        Location[] sel = selections.get(player.getUniqueId());
+        if (sel == null || sel[0] == null || sel[1] == null) {
+            plugin.messages().send(sender, "outline-need-positions");
+            return true;
+        }
+        if (!arena.addOutLine(sel[0], sel[1])) {
+            plugin.messages().send(sender, "outline-add-failed");
+            return true;
+        }
+        plugin.arenas().save();
+        plugin.messages().send(sender, "outline-added", "arena", arena.getName(),
+                "count", String.valueOf(arena.getOutLines().size()));
+        return true;
+    }
+
+    private boolean clearOutLines(CommandSender sender, String[] args) {
+        if (notAdmin(sender)) {
+            return true;
+        }
+        Arena arena = requireArena(sender, args);
+        if (arena == null) {
+            return true;
+        }
+        int count = arena.getOutLines().size();
+        arena.clearOutLines();
+        plugin.arenas().save();
+        plugin.messages().send(sender, "outline-cleared", "arena", arena.getName(),
+                "count", String.valueOf(count));
+        return true;
+    }
+
+    private boolean listOutLines(CommandSender sender, String[] args) {
+        if (notAdmin(sender)) {
+            return true;
+        }
+        Arena arena = requireArena(sender, args);
+        if (arena == null) {
+            return true;
+        }
+        int count = arena.getOutLines().size();
+        if (count == 0) {
+            plugin.messages().send(sender, "outline-list-empty", "arena", arena.getName());
+            return true;
+        }
+        plugin.messages().send(sender, "outline-list-header", "arena", arena.getName(),
+                "count", String.valueOf(count));
+        int index = 1;
+        for (TouchlineSegment segment : arena.getOutLines()) {
+            Location from = segment.from();
+            Location to = segment.to();
+            plugin.messages().sendRaw(sender, "&7  #" + index++ + " &f("
+                    + formatCoord(from.getX()) + ", " + formatCoord(from.getZ()) + ") -> ("
+                    + formatCoord(to.getX()) + ", " + formatCoord(to.getZ()) + ")");
         }
         return true;
+    }
+
+    private static String formatCoord(double value) {
+        return String.format(Locale.US, "%.1f", value);
     }
 
     // ==================================================================
@@ -484,7 +582,32 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         }
         plugin.reloadAll();
         plugin.arenas().load();
+        int removed = BallOrphanCleanup.cleanupAllArenas(plugin);
         plugin.messages().send(sender, "reload-success");
+        if (removed > 0) {
+            plugin.messages().sendRaw(sender, "&aRemoved &f" + removed + " &aorphaned ball(s) from arenas.");
+        }
+        return true;
+    }
+
+    private boolean cleanup(CommandSender sender, String[] args) {
+        if (notAdmin(sender)) {
+            return true;
+        }
+        int removed;
+        if (args.length >= 2) {
+            Arena arena = plugin.arenas().get(args[1]);
+            if (arena == null) {
+                plugin.messages().send(sender, "arena-not-found", "arena", args[1]);
+                return true;
+            }
+            removed = BallOrphanCleanup.cleanupArena(plugin, arena);
+            plugin.messages().sendRaw(sender, "&aRemoved &f" + removed
+                    + " &aorphaned ball(s) from arena &f" + arena.getName() + "&a.");
+        } else {
+            removed = BallOrphanCleanup.cleanupAllArenas(plugin);
+            plugin.messages().sendRaw(sender, "&aRemoved &f" + removed + " &aorphaned ball(s) from all arenas.");
+        }
         return true;
     }
 
@@ -506,7 +629,8 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         plugin.messages().sendRaw(sender, "&8 3. &7pos1/pos2 + &f/soccer setbluegoal " + arena);
         plugin.messages().sendRaw(sender, "&8 4. &f/soccer setballspawn " + arena + " &7(stand at center)");
         plugin.messages().sendRaw(sender, "&8 5. &f/soccer setredspawn / setbluespawn " + arena);
-        plugin.messages().sendRaw(sender, "&8 6. &f/soccer setlobby " + arena + " &7(optional)");
+        plugin.messages().sendRaw(sender, "&8 6. &7pos1/pos2 at each sideline + &f/soccer addoutline " + arena);
+        plugin.messages().sendRaw(sender, "&8 7. &f/soccer setlobby " + arena + " &7(optional)");
     }
 
     private boolean openChampionshipGui(CommandSender sender) {
@@ -653,7 +777,9 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         plugin.messages().sendRaw(sender, "&f/soccer leave &7- leave your match");
         plugin.messages().sendRaw(sender, "&f/soccer list &7- list arenas");
         plugin.messages().sendRaw(sender, "&f/soccer stats [player] &7- view stats");
-        plugin.messages().sendRaw(sender, "&f/soccer top [goals|wins|assists|tackles|saves]");
+        plugin.messages().sendRaw(sender, "&f/soccer top [category|all] &7- leaderboard column");
+        plugin.messages().sendRaw(sender, "&f/soccer leaderboard [category|all] &7- full leaderboards");
+        plugin.messages().sendRaw(sender, "&f/leaderboard [category|all] &7- same as above");
         plugin.messages().sendRaw(sender, "&f/soccer cup &7- open championships GUI");
         plugin.messages().sendRaw(sender, "&7Controls: &fLeft-click&7 shoot, &fRight-click&7 pass, "
                 + "&fSneak&7 charge, &fSneak+Sprint&7 tackle.");
@@ -661,6 +787,8 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             plugin.messages().sendRaw(sender, "&c/soccer create|delete|setfield|setredgoal|setbluegoal");
             plugin.messages().sendRaw(sender, "&c/soccer setballspawn|setredspawn|setbluespawn|setlobby");
             plugin.messages().sendRaw(sender, "&c/soccer pos1|pos2|enable|disable|start|stop|reload");
+            plugin.messages().sendRaw(sender, "&c/soccer resetstats <player|all> &7- reset lifetime stats");
+            plugin.messages().sendRaw(sender, "&c/soccer addoutline|clearoutlines|listoutlines <arena>");
             plugin.messages().sendRaw(sender, "&c/soccer cupcreate <id> <league|knockout> [name] [arena]");
             plugin.messages().sendRaw(sender, "&c/soccer cupdelete <id> | cupstart <id>");
             plugin.messages().sendRaw(sender, "&c/soccer cuprename <id> <name> | teamrename <cupId> [teamId] <name>");
@@ -714,8 +842,8 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         }
         if (args.length == 2) {
             String sub = args[0].toLowerCase(Locale.ROOT);
-            if (sub.equals("top")) {
-                return filter(Arrays.asList("goals", "wins", "assists", "tackles", "saves"), args[1]);
+            if (sub.equals("top") || sub.equals("leaderboard")) {
+                return filter(ChatLeaderboard.tabCompleteCategories(args[1]), args[1]);
             }
             if (sub.equals("quickjoin") && plugin.settings().quickjoinTeamPick) {
                 return filter(Arrays.asList("red", "blue"), args[1]);
@@ -733,7 +861,12 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
                 plugin.championships().getAll().forEach(c -> ids.add(c.getId()));
                 return filter(ids, args[1]);
             }
-            if (sub.equals("stats")) {
+            if (sub.equals("stats") || sub.equals("resetstats")) {
+                if (sub.equals("resetstats") && sender.hasPermission("soccer.admin")) {
+                    List<String> names = new ArrayList<>(onlinePlayerNames());
+                    names.add("all");
+                    return filter(names, args[1]);
+                }
                 return filter(onlinePlayerNames(), args[1]);
             }
             if (needsArena(sub)) {
@@ -746,7 +879,8 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
     private boolean needsArena(String sub) {
         return Arrays.asList("join", "delete", "setfield", "setredgoal", "setbluegoal",
                 "setballspawn", "setredspawn", "setbluespawn", "setlobby", "setspectator",
-                "enable", "disable", "start", "stop").contains(sub);
+                "enable", "disable", "start", "stop", "cleanup",
+                "addoutline", "clearoutlines", "listoutlines").contains(sub);
     }
 
     private List<String> onlinePlayerNames() {

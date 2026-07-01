@@ -7,6 +7,10 @@ import org.bukkit.Location;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * A fully-described soccer pitch. An arena is "setup-complete" once it has a
  * field region, a ball/center spawn, both team spawns and both goals defined.
@@ -34,6 +38,9 @@ public final class Arena {
     private Location blueSpawn;    // BLUE team spawn
     private Location lobby;        // pre-game waiting spot
     private Location spectator;    // optional spectator/camera spot
+
+    /** Custom touchlines marked with pos1/pos2 ({@code /soccer addoutline}). */
+    private final List<TouchlineSegment> outLines = new ArrayList<>();
 
     private boolean enabled = true;
 
@@ -385,6 +392,86 @@ public final class Arena {
         return side == TeamSide.RED ? redGoal : blueGoal;
     }
 
+    public List<TouchlineSegment> getOutLines() {
+        return Collections.unmodifiableList(outLines);
+    }
+
+    public boolean hasOutLines() {
+        return !outLines.isEmpty();
+    }
+
+    public boolean addOutLine(Location pos1, Location pos2) {
+        if (pos1 == null || pos2 == null || pos1.getWorld() == null || pos2.getWorld() == null) {
+            return false;
+        }
+        if (!pos1.getWorld().equals(pos2.getWorld())) {
+            return false;
+        }
+        if (pos1.distanceSquared(pos2) < 0.25) {
+            return false;
+        }
+        outLines.add(TouchlineSegment.fromMarkedPoints(pos1, pos2, field));
+        return true;
+    }
+
+    public void clearOutLines() {
+        outLines.clear();
+    }
+
+    /**
+     * Detects whether the ball path crossed a marked touchline (any height).
+     * Returns the earliest crossing along the path.
+     */
+    public OutLineCrossing detectOutLineCrossing(Location prev, Location curr) {
+        if (outLines.isEmpty() || curr == null || prev == null) {
+            return null;
+        }
+        if (prev.getWorld() == null || curr.getWorld() == null || !prev.getWorld().equals(curr.getWorld())) {
+            return null;
+        }
+
+        OutLineCrossing best = null;
+        double bestT = Double.MAX_VALUE;
+
+        for (TouchlineSegment segment : outLines) {
+            Double t = TouchlineMath.pathCrossesSegment(prev, curr, segment);
+            if (t == null || t >= bestT) {
+                continue;
+            }
+            bestT = t;
+            Location exit = TouchlineMath.interpolate(prev, curr, t);
+            best = buildOutLineCrossing(exit, segment);
+        }
+        return best;
+    }
+
+    private OutLineCrossing buildOutLineCrossing(Location exit, TouchlineSegment segment) {
+        double param = TouchlineMath.projectParam(exit, segment.from(), segment.to());
+        Location onLine = segment.pointAt(param);
+        Vector outward = segment.outward();
+
+        double groundY = field != null ? field.getMinY() + 0.35 : exit.getY();
+        Location spot = onLine.clone().add(outward.clone().multiply(0.55));
+        spot.setY(groundY);
+
+        Vector inward = segment.inward().clone();
+        if (inward.lengthSquared() > 1e-6) {
+            inward.normalize();
+        }
+        float yaw = (float) Math.toDegrees(Math.atan2(-inward.getX(), inward.getZ()));
+        spot.setYaw(yaw);
+        spot.setPitch(0f);
+
+        ThrowInGeometry geometry = new ThrowInGeometry(
+                spot.clone(),
+                inward,
+                false,
+                false,
+                segment.from(),
+                segment.to());
+        return new OutLineCrossing(exit.clone(), spot, geometry);
+    }
+
     // --- getters / setters ---
 
     public Cuboid getField() { return field; }
@@ -432,6 +519,12 @@ public final class Arena {
         Locations.save(section, "blue-spawn", blueSpawn);
         Locations.save(section, "lobby", lobby);
         Locations.save(section, "spectator", spectator);
+        if (!outLines.isEmpty()) {
+            ConfigurationSection lines = section.createSection("out-lines");
+            for (int i = 0; i < outLines.size(); i++) {
+                outLines.get(i).save(lines.createSection(String.valueOf(i)));
+            }
+        }
     }
 
     public static Arena load(String name, ConfigurationSection section) {
@@ -451,6 +544,19 @@ public final class Arena {
         arena.blueSpawn = Locations.load(section, "blue-spawn");
         arena.lobby = Locations.load(section, "lobby");
         arena.spectator = Locations.load(section, "spectator");
+        if (section.isConfigurationSection("out-lines")) {
+            ConfigurationSection lines = section.getConfigurationSection("out-lines");
+            for (String key : lines.getKeys(false)) {
+                ConfigurationSection lineSection = lines.getConfigurationSection(key);
+                if (lineSection == null) {
+                    continue;
+                }
+                TouchlineSegment segment = TouchlineSegment.load(lineSection);
+                if (segment != null) {
+                    arena.outLines.add(segment);
+                }
+            }
+        }
         return arena;
     }
 }
