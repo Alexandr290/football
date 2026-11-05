@@ -66,7 +66,7 @@ final class BotAttributes {
         double baseDrain = settings != null && settings.botSprintDrain > 0
                 ? settings.botSprintDrain : 0.5;
 
-        double topSpeed = lerp(0.98, 1.10, rng.nextDouble());
+        double topSpeed = lerp(0.94, 1.02, rng.nextDouble());
         double accel = lerp(1.0, 1.26, rng.nextDouble());
         double agility = lerp(0.88, 1.16, rng.nextDouble());
         double stamina = baseMaxStamina * lerp(0.88, 1.12, rng.nextDouble());
@@ -82,21 +82,18 @@ final class BotAttributes {
             case GOALKEEPER -> {
                 anticipation += 0.16;
                 composure += 0.10;
-                agility += 0.10;
-                accel += 0.06;
-                // Sharpest reflexes on the pitch: re-reads the ball every tick.
                 reaction = 1;
                 workRate -= 0.1;
             }
             case STRIKER -> {
-                topSpeed += 0.03;
+                topSpeed += 0.01;
                 composure += 0.10;
                 anticipation += 0.06;
                 workRate += 0.05;
                 reaction = 1;
             }
             case WINGER -> {
-                topSpeed += 0.04;
+                topSpeed += 0.015;
                 agility += 0.05;
                 anticipation += 0.05;
                 workRate += 0.08;

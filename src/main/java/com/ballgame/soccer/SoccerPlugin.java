@@ -12,6 +12,7 @@ import com.ballgame.soccer.config.Messages;
 import com.ballgame.soccer.config.SoccerSettings;
 import com.ballgame.soccer.championship.ChampionshipManager;
 import com.ballgame.soccer.championship.ChampionshipType;
+import com.ballgame.soccer.fifa.FifaCatalog;
 import com.ballgame.soccer.crowd.CrowdResourcePack;
 import com.ballgame.soccer.game.GameManager;
 import com.ballgame.soccer.listener.NetworkPlayerListener;
@@ -21,9 +22,11 @@ import com.ballgame.soccer.listener.ChampionshipGuiListener;
 import com.ballgame.soccer.listener.ChampionshipRenameListener;
 import com.ballgame.soccer.listener.CrowdPackListener;
 import com.ballgame.soccer.listener.PlayerActionListener;
+import com.ballgame.soccer.listener.PlayerRefereeListener;
 import com.ballgame.soccer.listener.PlayerConnectionListener;
 import com.ballgame.soccer.stats.LeaderboardBroadcaster;
 import com.ballgame.soccer.stats.StatsManager;
+import com.ballgame.soccer.history.MatchHistoryManager;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -40,7 +43,9 @@ public final class SoccerPlugin extends JavaPlugin {
     private ArenaManager arenaManager;
     private GameManager gameManager;
     private StatsManager statsManager;
+    private MatchHistoryManager matchHistoryManager;
     private ChampionshipManager championshipManager;
+    private FifaCatalog fifaCatalog;
     private CrowdResourcePack crowdPack;
     private NetworkManager networkManager;
     private LeaderboardBroadcaster leaderboardBroadcaster;
@@ -64,6 +69,12 @@ public final class SoccerPlugin extends JavaPlugin {
 
         this.statsManager = new StatsManager(this);
         this.statsManager.load();
+
+        this.matchHistoryManager = new MatchHistoryManager(this);
+        this.matchHistoryManager.load();
+
+        this.fifaCatalog = new FifaCatalog(this);
+        this.fifaCatalog.load();
 
         this.championshipManager = new ChampionshipManager(this);
         this.championshipManager.load();
@@ -109,6 +120,9 @@ public final class SoccerPlugin extends JavaPlugin {
         if (statsManager != null) {
             statsManager.save();
         }
+        if (matchHistoryManager != null) {
+            matchHistoryManager.save();
+        }
         if (championshipManager != null) {
             championshipManager.save();
         }
@@ -133,6 +147,9 @@ public final class SoccerPlugin extends JavaPlugin {
             crowdPack.stop();
             crowdPack.start();
         }
+        if (fifaCatalog != null) {
+            fifaCatalog.load();
+        }
         if (leaderboardBroadcaster != null) {
             leaderboardBroadcaster.restart();
         }
@@ -140,6 +157,7 @@ public final class SoccerPlugin extends JavaPlugin {
 
     private void registerListeners() {
         getServer().getPluginManager().registerEvents(new PlayerActionListener(this), this);
+        getServer().getPluginManager().registerEvents(new PlayerRefereeListener(this), this);
         getServer().getPluginManager().registerEvents(new BallProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
         getServer().getPluginManager().registerEvents(new NetworkPlayerListener(this), this);
@@ -176,6 +194,9 @@ public final class SoccerPlugin extends JavaPlugin {
         autoSaveTask = getServer().getScheduler().runTaskTimer(this, () -> {
             arenaManager.save();
             statsManager.save();
+            if (matchHistoryManager != null) {
+                matchHistoryManager.save();
+            }
             if (championshipManager != null) {
                 championshipManager.save();
             }
@@ -202,8 +223,16 @@ public final class SoccerPlugin extends JavaPlugin {
         return statsManager;
     }
 
+    public MatchHistoryManager matchHistory() {
+        return matchHistoryManager;
+    }
+
     public ChampionshipManager championships() {
         return championshipManager;
+    }
+
+    public FifaCatalog fifaCatalog() {
+        return fifaCatalog;
     }
 
     public CrowdResourcePack crowdPack() {

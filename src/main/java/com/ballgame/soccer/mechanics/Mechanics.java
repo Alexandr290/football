@@ -6,12 +6,26 @@ import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
+import java.util.concurrent.ThreadLocalRandom;
+
 /**
  * Pure functions that turn a player's intent (look direction, movement, sprint,
  * charge) into ball impulse and spin vectors. Kept side-effect free so it can be
  * unit-reasoned about and reused by tackles, headers, dribbles and shots.
  */
 public final class Mechanics {
+
+    /** Q-key low cross: exactly 3 blocks high, 15–20 blocks along look direction. */
+    private static final double CROSS_PASS_APEX_BLOCKS = 3.0;
+    /**
+     * Per-tick physics undershoots the continuous sqrt(2gh) formula slightly;
+     * this factor lands the cross peak at exactly 3 blocks in-game.
+     */
+    private static final double CROSS_PASS_APEX_CALIBRATION = 1.20;
+    /** Compensates horizontal slowdown from per-tick air drag during flight. */
+    private static final double CROSS_PASS_RANGE_DRAG_CALIBRATION = 0.77;
+    private static final double CROSS_PASS_TRAVEL_MIN = 15.0;
+    private static final double CROSS_PASS_TRAVEL_MAX = 20.0;
 
     /** Result of a kick computation: the linear impulse plus imparted spin. */
     public static final class Kick {
@@ -37,6 +51,13 @@ public final class Mechanics {
     }
 
     public static Kick compute(KickActor actor, SoccerSettings s, KickType type, double chargeFraction) {
+        if (type == KickType.LOFT_PASS) {
+            return computeLoftPass(actor, s);
+        }
+        if (type == KickType.CROSS_PASS) {
+            return computeCrossPass(actor, s);
+        }
+
         Vector look = actor.getEyeLocation().getDirection().normalize();
         Vector flatLook = new Vector(look.getX(), 0, look.getZ());
         if (flatLook.lengthSquared() < 1.0e-6) {
@@ -94,12 +115,14 @@ public final class Mechanics {
 
         // Sprinting adds the player's forward momentum to the strike.
         if (actor.isSprinting()) {
-            impulse.add(flatLook.clone().multiply(s.sprintBonus));
+            double sprintScale = type == KickType.LOFT_PASS || type == KickType.CROSS_PASS ? 0.25 : 1.0;
+            impulse.add(flatLook.clone().multiply(s.sprintBonus * sprintScale));
         }
 
         // ---- spin (curve + lift), turned into force by the Magnus term ----
         Vector spin = new Vector(0, 0, 0);
-        if (type == KickType.SHOT || type == KickType.PASS || type == KickType.THROW_IN) {
+        if (type == KickType.SHOT || type == KickType.PASS || type == KickType.LOFT_PASS
+                || type == KickType.CROSS_PASS || type == KickType.THROW_IN) {
             // Side-spin: striking across the ball while moving sideways relative
             // to your aim bends the ball's flight left or right.
             Vector move = actor.getVelocity();
@@ -123,6 +146,125 @@ public final class Mechanics {
             }
         }
         return new Kick(impulse, spin);
+    }
+
+    /** F-key loft pass: chipped ball along look direction, apex 5–7 blocks. */
+    private static Kick computeLoftPass(KickActor actor, SoccerSettings s) {
+        Vector look = actor.getEyeLocation().getDirection().normalize();
+        Vector flatLook = new Vector(look.getX(), 0, look.getZ());
+        if (flatLook.lengthSquared() < 1.0e-6) {
+            flatLook = new Vector(0, 0, 1);
+        }
+        flatLook.normalize();
+
+        double power = s.loftPassHorizontalPower;
+        int apexBlocks = 5 + ThreadLocalRandom.current().nextInt(3);
+        double vertical = Math.sqrt(2.0 * s.gravity * apexBlocks);
+
+        Vector impulse = flatLook.clone().multiply(power);
+        impulse.setY(vertical);
+
+        if (actor.isSprinting()) {
+            impulse.add(flatLook.clone().multiply(s.sprintBonus * 0.25));
+        }
+
+        Vector spin = loftPassSpin(actor, flatLook, look, s, 0.0);
+        return new Kick(impulse, spin);
+    }
+
+    /** Q-key low cross: exactly 3 blocks high, 15–20 blocks along look direction. */
+    private static Kick computeCrossPass(KickActor actor, SoccerSettings s) {
+        Vector look = actor.getEyeLocation().getDirection().normalize();
+        Vector flatLook = new Vector(look.getX(), 0, look.getZ());
+        if (flatLook.lengthSquared() < 1.0e-6) {
+            flatLook = new Vector(0, 0, 1);
+        }
+        flatLook.normalize();
+
+        double travelBlocks = CROSS_PASS_TRAVEL_MIN
+                + ThreadLocalRandom.current().nextDouble()
+                * (CROSS_PASS_TRAVEL_MAX - CROSS_PASS_TRAVEL_MIN);
+
+        double vertical = crossPassVerticalSpeed(s);
+        double horizontal = horizontalSpeedForRange(s, travelBlocks, vertical);
+
+        Vector impulse = flatLook.clone().multiply(horizontal);
+        impulse.setY(vertical);
+
+        if (actor.isSprinting()) {
+            impulse.add(flatLook.clone().multiply(s.sprintBonus * 0.12));
+        }
+
+        // No spin: Magnus lift would push the cross above the 3-block cap.
+        return new Kick(impulse, new Vector(0, 0, 0));
+    }
+
+    private static double crossPassVerticalSpeed(SoccerSettings s) {
+        return Math.sqrt(2.0 * s.gravity * CROSS_PASS_APEX_BLOCKS * CROSS_PASS_APEX_CALIBRATION);
+    }
+
+    private static double horizontalSpeedForRange(SoccerSettings s, double rangeBlocks, double vertical) {
+        if (vertical <= 1.0e-6) {
+            return s.loftPassHorizontalPower;
+        }
+        double flightTicks = 2.0 * vertical / s.gravity;
+        return (rangeBlocks / Math.max(6.0, flightTicks)) * CROSS_PASS_RANGE_DRAG_CALIBRATION;
+    }
+
+    private static Vector loftPassSpin(KickActor actor, Vector flatLook, Vector look,
+                                       SoccerSettings s, double chargeFraction) {
+        Vector spin = new Vector(0, 0, 0);
+        Vector move = actor.getVelocity();
+        Vector flatMove = new Vector(move.getX(), 0, move.getZ());
+        if (flatMove.lengthSquared() > 1.0e-4) {
+            double side = flatLook.clone().crossProduct(flatMove).getY();
+            spin.setY(side * s.curveStrength);
+        }
+        double up = Math.max(0.0, look.getY());
+        if (up > 0.05) {
+            Vector liftAxis = flatLook.clone().crossProduct(new Vector(0, 1, 0));
+            if (liftAxis.lengthSquared() > 1.0e-6) {
+                liftAxis.normalize().multiply(
+                        up * s.curveStrength * 0.35 * (0.4 + chargeFraction));
+                spin.add(liftAxis);
+            }
+        }
+        return spin;
+    }
+
+    /** Bot loft pass aimed at a teammate over defenders (apex scales with distance). */
+    public static Kick computeBotLoftPassToward(Location from, Location target, SoccerSettings s) {
+        Vector flat = flatVector(from, target);
+        double dist = flat.length();
+        if (flat.lengthSquared() < 1.0e-6) {
+            flat = new Vector(0, 0, 1);
+            dist = 12.0;
+        } else {
+            flat.normalize();
+        }
+        int apexBlocks = (int) Math.max(4.0, Math.min(7.0, 4.0 + dist / 7.0));
+        double vertical = Math.sqrt(2.0 * s.gravity * apexBlocks);
+        double power = Math.max(0.22, Math.min(0.52, s.loftPassHorizontalPower * (0.75 + dist / 28.0)));
+        Vector impulse = flat.clone().multiply(power);
+        impulse.setY(vertical);
+        return new Kick(impulse, new Vector(0, 0, 0));
+    }
+
+    /** Bot low cross aimed at a runner in the box (3-block apex). */
+    public static Kick computeBotCrossPassToward(Location from, Location target, SoccerSettings s) {
+        Vector flat = flatVector(from, target);
+        double dist = flat.length();
+        if (flat.lengthSquared() < 1.0e-6) {
+            flat = new Vector(0, 0, 1);
+            dist = 16.0;
+        } else {
+            flat.normalize();
+        }
+        double vertical = crossPassVerticalSpeed(s);
+        double horizontal = horizontalSpeedForRange(s, Math.max(12.0, Math.min(22.0, dist)), vertical);
+        Vector impulse = flat.clone().multiply(horizontal);
+        impulse.setY(vertical);
+        return new Kick(impulse, new Vector(0, 0, 0));
     }
 
     public static Kick computeBotPassToward(Location from, Location target, SoccerSettings s,

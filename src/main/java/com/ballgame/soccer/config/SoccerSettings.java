@@ -26,6 +26,8 @@ public final class SoccerSettings {
     public int maxPlayersPerTeam;
     public int lobbyCountdown;
     public int kickoffCountdown;
+    /** Seconds to wait for humans before auto-filling empty squad slots with bots. */
+    public int lobbyBotFillGrace;
     public int matchDuration;
     public int halves;
     public int halftimeBreak;
@@ -34,6 +36,8 @@ public final class SoccerSettings {
     public boolean penaltyShootout;
     public boolean allowRejoin;
     public boolean quickjoinTeamPick;
+    public boolean stoppageTimeEnabled;
+    public int stoppageTimeMaxSeconds;
     public boolean botsEnabled;
     public int botMinSoloCount;
     public int botMaxSoloCount;
@@ -48,6 +52,8 @@ public final class SoccerSettings {
     public double botStaminaRecoverThreshold;
     public java.util.List<String> botNames;
     public String botVisualType;
+    /** When true, Citizens NPCs pathfind; when false, plugin physics moves them (recommended). */
+    public boolean botCitizensPathfind;
     public java.util.List<String> botSkinNames;
     public int mercyRuleLead;
     public boolean throwInEnabled;
@@ -94,6 +100,12 @@ public final class SoccerSettings {
     public double refereeSprintSpeed;
     public double refereeSprintThreshold;
     public boolean refereeWhistleEnabled;
+    public boolean autoRefereeEnabled;
+    public int autoRefereeKeeperHoldSeconds;
+    public int autoRefereePlayerHoldSeconds;
+    public int autoRefereeTimeWasteSeconds;
+    public int autoRefereeHoldContestSeconds;
+    public int autoRefereeDissentWindowTicks;
     public String refereeEntityType;
     public String refereeSkinTexture;
 
@@ -123,6 +135,7 @@ public final class SoccerSettings {
     public double chargeTime;
     public double shotLift;
     public double passPowerMultiplier;
+    public double loftPassHorizontalPower;
     public double sprintBonus;
     public double curveStrength;
     public boolean tackleEnabled;
@@ -174,8 +187,13 @@ public final class SoccerSettings {
     public int champGroupCount;
     public int champTeamsPerGroup;
     public int champAdvancePerGroup;
+    public boolean worldCupR16;
+    public int worldCupBracketSize;
 
     public int worldCupTeamSlots() {
+        if (worldCupR16) {
+            return Math.max(2, worldCupBracketSize);
+        }
         return champGroupCount * champTeamsPerGroup;
     }
 
@@ -211,6 +229,7 @@ public final class SoccerSettings {
         maxPlayersPerTeam = c.getInt("game.max-players-per-team", 11);
         lobbyCountdown = c.getInt("game.lobby-countdown", 15);
         kickoffCountdown = c.getInt("game.kickoff-countdown", 3);
+        lobbyBotFillGrace = Math.max(0, c.getInt("game.lobby-bot-fill-grace", 15));
         matchDuration = c.getInt("game.match-duration", 300);
         halves = Math.max(1, c.getInt("game.halves", 2));
         halftimeBreak = c.getInt("game.halftime-break", 30);
@@ -219,15 +238,17 @@ public final class SoccerSettings {
         penaltyShootout = c.getBoolean("game.penalty-shootout", true);
         allowRejoin = c.getBoolean("game.allow-rejoin", true);
         quickjoinTeamPick = c.getBoolean("game.quickjoin-team-pick", true);
+        stoppageTimeEnabled = c.getBoolean("game.stoppage-time-enabled", true);
+        stoppageTimeMaxSeconds = Math.max(0, c.getInt("game.stoppage-time-max-seconds", 180));
         botsEnabled = c.getBoolean("bots.enabled", true);
         botMinSoloCount = Math.max(1, c.getInt("bots.min-solo-count", 1));
-        botMaxSoloCount = Math.max(botMinSoloCount, c.getInt("bots.max-solo-count", 10));
+        botMaxSoloCount = Math.max(botMinSoloCount, c.getInt("bots.max-solo-count", 11));
         botDefaultSoloCount = Math.max(botMinSoloCount,
                 Math.min(botMaxSoloCount, c.getInt("bots.default-solo-count", 4)));
         botDefaultTeammateCount = Math.max(0,
                 Math.min(botMaxSoloCount, c.getInt("bots.default-teammate-count", 0)));
         botWalkSpeed = c.getDouble("bots.walk-speed", 0.216);
-        botSprintSpeed = c.getDouble("bots.sprint-speed", 0.32);
+        botSprintSpeed = c.getDouble("bots.sprint-speed", 0.28);
         botStaminaEnabled = c.getBoolean("bots.stamina-enabled", true);
         botMaxStamina = c.getDouble("bots.max-stamina", 100.0);
         botStaminaRegen = c.getDouble("bots.stamina-regen", 0.65);
@@ -239,6 +260,7 @@ public final class SoccerSettings {
                     "Striker", "Midfielder", "Winger", "Playmaker", "Defender");
         }
         botVisualType = c.getString("bots.visual", "auto");
+        botCitizensPathfind = c.getBoolean("bots.citizens-pathfind", false);
         botSkinNames = c.getStringList("bots.skin-names");
         if (botSkinNames.isEmpty()) {
             botSkinNames = java.util.List.of(
@@ -290,6 +312,12 @@ public final class SoccerSettings {
         refereeSprintSpeed = c.getDouble("referee.sprint-speed", 0.30);
         refereeSprintThreshold = c.getDouble("referee.sprint-threshold", 4.0);
         refereeWhistleEnabled = c.getBoolean("referee.whistle-enabled", true);
+        autoRefereeEnabled = c.getBoolean("referee.auto-referee-enabled", false);
+        autoRefereeKeeperHoldSeconds = Math.max(1, c.getInt("referee.auto-referee-keeper-hold-seconds", 6));
+        autoRefereePlayerHoldSeconds = Math.max(1, c.getInt("referee.auto-referee-player-hold-seconds", 5));
+        autoRefereeTimeWasteSeconds = Math.max(3, c.getInt("referee.auto-referee-time-waste-seconds", 12));
+        autoRefereeHoldContestSeconds = Math.max(2, c.getInt("referee.auto-referee-hold-contest-seconds", 4));
+        autoRefereeDissentWindowTicks = Math.max(20, c.getInt("referee.auto-referee-dissent-window-ticks", 80));
         refereeEntityType = c.getString("referee.entity-type", "auto");
         refereeSkinTexture = c.getString("referee.skin-texture", "");
 
@@ -333,6 +361,11 @@ public final class SoccerSettings {
         champGroupCount = c.getInt("championships.group-count", 8);
         champTeamsPerGroup = c.getInt("championships.teams-per-group", 2);
         champAdvancePerGroup = c.getInt("championships.advance-per-group", 1);
+        worldCupR16 = c.getBoolean("championships.world-cup-r16", true);
+        worldCupBracketSize = c.getInt("championships.world-cup-bracket-size", 16);
+        if (worldCupR16) {
+            champMaxTeams = Math.max(champMaxTeams, worldCupBracketSize);
+        }
 
         ballDisplay = c.getString("ball.display", "HEAD").toUpperCase();
         ballHeadTexture = c.getString("ball.head-texture", "");
@@ -358,6 +391,7 @@ public final class SoccerSettings {
         chargeTime = c.getDouble("mechanics.charge-time", 1.2);
         shotLift = c.getDouble("mechanics.shot-lift", 0.32);
         passPowerMultiplier = c.getDouble("mechanics.pass-power-multiplier", 0.6);
+        loftPassHorizontalPower = c.getDouble("mechanics.loft-pass-horizontal-power", 0.30);
         sprintBonus = c.getDouble("mechanics.sprint-bonus", 0.35);
         curveStrength = c.getDouble("mechanics.curve-strength", 0.9);
         tackleEnabled = c.getBoolean("mechanics.tackle-enabled", true);

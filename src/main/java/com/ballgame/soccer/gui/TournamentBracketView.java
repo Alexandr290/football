@@ -226,15 +226,8 @@ public final class TournamentBracketView {
 
         if (clickable) {
             final ChampFixture selected = fixture;
-            clickRegistrar.accept(slot, () -> {
-                if (plugin.championships().joinFixtureMatch(viewer, championship, selected)) {
-                    msg.send(viewer, "champ-joined-match", "arena",
-                            plugin.championships().resolveFixtureArenaName(championship, selected));
-                    viewer.closeInventory();
-                } else {
-                    msg.send(viewer, "champ-join-failed");
-                }
-            });
+            clickRegistrar.accept(slot, () ->
+                    ChampMenus.openFixtureJoin(plugin, viewer, championship, selected));
         }
     }
 
@@ -440,15 +433,8 @@ public final class TournamentBracketView {
 
         if (clickable) {
             final ChampFixture selected = fixture;
-            clickRegistrar.accept(slot, () -> {
-                if (plugin.championships().joinFixtureMatch(viewer, championship, selected)) {
-                    msg.send(viewer, "champ-joined-match", "arena",
-                            plugin.championships().resolveFixtureArenaName(championship, selected));
-                    viewer.closeInventory();
-                } else {
-                    msg.send(viewer, "champ-join-failed");
-                }
-            });
+            clickRegistrar.accept(slot, () ->
+                    ChampMenus.openFixtureJoin(plugin, viewer, championship, selected));
         }
     }
 
@@ -478,13 +464,12 @@ public final class TournamentBracketView {
         lore.add("");
         lore.add("&7" + msg.raw("champ-bracket-status") + " &f" + fixture.getState().display());
 
-        if (fixture.getState() == FixtureState.PENDING
-                && fixture.involvesPlayer(championship, viewer.getUniqueId())) {
+        if (fixture.getState() == FixtureState.PENDING && teamsReady) {
             lore.add("");
-            if (teamsReady) {
+            if (plugin.championships().allowsOpenFixtureJoin(championship, fixture)) {
+                lore.add(msg.raw("champ-gui-fixture-open-join-lore"));
+            } else if (fixture.involvesPlayer(championship, viewer.getUniqueId())) {
                 lore.add(msg.raw("champ-gui-fixture-join-lore"));
-            } else {
-                lore.add(msg.raw("champ-wc-teams-not-ready-lore"));
             }
         } else if (fixture.getState() == FixtureState.PENDING && !teamsReady && fixture.hasBothSides()) {
             lore.add("");

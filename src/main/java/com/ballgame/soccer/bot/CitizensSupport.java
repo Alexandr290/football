@@ -37,6 +37,7 @@ public final class CitizensSupport {
     private static Method cancelNavigation;
     private static Method setProtected;
     private static Method navigatorSetTargetLocation;
+    private static Method navigatorSetStraightLineTarget;
     private static Method navigatorIsNavigating;
     private static Method navigatorGetDefaultParameters;
     private static Method navigatorGetLocalParameters;
@@ -78,6 +79,11 @@ public final class CitizensSupport {
             cancelNavigation = getNavigator.getReturnType().getMethod("cancelNavigation");
             setProtected = npcClass.getMethod("setProtected", boolean.class);
             navigatorSetTargetLocation = navigatorClass.getMethod("setTarget", Location.class);
+            try {
+                navigatorSetStraightLineTarget = navigatorClass.getMethod("setStraightLineTarget", Location.class);
+            } catch (NoSuchMethodException ignored) {
+                navigatorSetStraightLineTarget = null;
+            }
             navigatorIsNavigating = navigatorClass.getMethod("isNavigating");
             navigatorGetDefaultParameters = navigatorClass.getMethod("getDefaultParameters");
             navigatorGetLocalParameters = navigatorClass.getMethod("getLocalParameters");
@@ -163,7 +169,11 @@ public final class CitizensSupport {
                 if (shouldRefreshTarget(target, sprint)) {
                     Location at = target.clone();
                     at.setPitch(0f);
-                    navigatorSetTargetLocation.invoke(navigator, at);
+                    if (navigatorSetStraightLineTarget != null) {
+                        navigatorSetStraightLineTarget.invoke(navigator, at);
+                    } else {
+                        navigatorSetTargetLocation.invoke(navigator, at);
+                    }
                     Object local = navigatorGetLocalParameters.invoke(navigator);
                     navigatorParametersSpeedModifier.invoke(local, speedModifier);
                     lastNavTarget = at.clone();
@@ -265,6 +275,14 @@ public final class CitizensSupport {
             }
         }
 
+        public void applySneak(boolean sneak) {
+            Entity ent = getEntity();
+            if (ent instanceof LivingEntity living) {
+                invokeBoolean(living, "setSneaking", sneak);
+                invokeBoolean(living, "setSwimming", sneak);
+            }
+        }
+
         public void destroy() {
             try {
                 destroy.invoke(npc);
@@ -283,9 +301,6 @@ public final class CitizensSupport {
                 return true;
             }
             if (sprint != lastNavSprint) {
-                return true;
-            }
-            if (!isNavigating()) {
                 return true;
             }
             double dx = target.getX() - lastNavTarget.getX();

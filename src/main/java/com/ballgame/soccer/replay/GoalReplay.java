@@ -38,6 +38,7 @@ public final class GoalReplay {
     private final List<ReplayFrame> frames;
     private final TeamSide scoringTeam;
     private final UUID scorerId;
+    private final boolean varReview;
 
     private final Map<UUID, ViewerState> savedStates = new HashMap<>();
     private final Map<UUID, Location> smoothedCameras = new HashMap<>();
@@ -54,6 +55,11 @@ public final class GoalReplay {
 
     public GoalReplay(SoccerPlugin plugin, Game game, List<ReplayFrame> frames,
                       TeamSide scoringTeam, UUID scorerId) {
+        this(plugin, game, frames, scoringTeam, scorerId, false);
+    }
+
+    private GoalReplay(SoccerPlugin plugin, Game game, List<ReplayFrame> frames,
+                       TeamSide scoringTeam, UUID scorerId, boolean varReview) {
         this.plugin = plugin;
         this.settings = plugin.settings();
         this.game = game;
@@ -61,9 +67,18 @@ public final class GoalReplay {
         this.frames = frames;
         this.scoringTeam = scoringTeam;
         this.scorerId = scorerId;
-        this.introTicks = settings.replayGoalHoldTicks;
+        this.varReview = varReview;
+        this.introTicks = varReview ? Math.max(10, settings.replayGoalHoldTicks / 2) : settings.replayGoalHoldTicks;
         this.cameraStyle = parseCameraStyle(settings.replayCameraStyle);
         this.actors = new ReplayActorManager(plugin);
+    }
+
+    public static GoalReplay varReview(SoccerPlugin plugin, Game game, List<ReplayFrame> frames) {
+        return new GoalReplay(plugin, game, frames, null, null, true);
+    }
+
+    public boolean isVarReview() {
+        return varReview;
     }
 
     public void begin() {
@@ -86,9 +101,10 @@ public final class GoalReplay {
         }
 
         if (settings.replayBossBar) {
+            String barKey = varReview ? "referee-var-boss-bar" : "replay-boss-bar";
             bossBar = plugin.getServer().createBossBar(
-                    Text.color(plugin.messages().raw("replay-boss-bar")),
-                    BarColor.YELLOW, BarStyle.SEGMENTED_10);
+                    Text.color(plugin.messages().raw(barKey)),
+                    varReview ? BarColor.WHITE : BarColor.YELLOW, BarStyle.SEGMENTED_10);
             bossBar.setProgress(0);
             for (Player player : viewers) {
                 bossBar.addPlayer(player);
@@ -102,10 +118,12 @@ public final class GoalReplay {
         }
         applyPitchFrame(introFrame);
 
+        String titleKey = varReview ? "referee-var-title" : "title-replay";
+        String subtitleKey = varReview ? "referee-var-subtitle" : "subtitle-replay";
         game.forEachParticipant(player -> {
             player.sendTitle(
-                    Text.color(plugin.messages().raw("title-replay")),
-                    Text.color(plugin.messages().raw("subtitle-replay")),
+                    Text.color(plugin.messages().raw(titleKey)),
+                    Text.color(plugin.messages().raw(subtitleKey)),
                     5, 30, 10);
             player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 0.6f);
         });

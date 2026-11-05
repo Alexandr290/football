@@ -69,6 +69,9 @@ public final class Ball {
     private UUID prevTouchId;
     private TeamSide prevTouchTeam;
     private long lastTouchTick = -1;
+    private boolean dampenNextGroundBounce;
+    private boolean blockCollisionThisTick;
+    private long suppressGoalUntilTick = -1L;
 
     public Ball(SoccerPlugin plugin) {
         this.plugin = plugin;
@@ -191,6 +194,7 @@ public final class Ball {
         }
 
         previousTickLocation = location.clone();
+        blockCollisionThisTick = false;
 
         boolean airborne = !detectGround();
 
@@ -292,10 +296,14 @@ public final class Ball {
                         // Too slow to bounce again -> settle and start rolling.
                         velocity.setY(0);
                     } else {
+                        double restitution = dampenNextGroundBounce
+                                ? Math.min(settings.restitution, 0.28)
+                                : settings.restitution;
+                        dampenNextGroundBounce = false;
                         // Bounce: keep a fraction of the impact speed, and scrub
                         // some horizontal speed off against the turf each bounce
                         // so successive bounces are lower and shorter (realistic).
-                        velocity.setY(-vy * settings.restitution);
+                        velocity.setY(-vy * restitution);
                         velocity.setX(velocity.getX() * settings.bounceFriction);
                         velocity.setZ(velocity.getZ() * settings.bounceFriction);
                     }
@@ -331,6 +339,7 @@ public final class Ball {
         }
 
         if (isBlockingAt(px, py, pz, axis)) {
+            blockCollisionThisTick = true;
             return true;
         }
 
@@ -483,6 +492,28 @@ public final class Ball {
         frozen = false;
     }
 
+    /**
+     * Replaces the ball's velocity for a clean strike (pass / cross / loft / shot).
+     */
+    public void applyKick(Vector impulse, Vector spinAdd, boolean dampenGroundBounce) {
+        dampenNextGroundBounce = dampenGroundBounce;
+        if (impulse != null) {
+            velocity.setX(impulse.getX());
+            velocity.setY(impulse.getY());
+            velocity.setZ(impulse.getZ());
+        }
+        if (spinAdd != null) {
+            spin.setX(spinAdd.getX());
+            spin.setY(spinAdd.getY());
+            spin.setZ(spinAdd.getZ());
+        } else {
+            spin.setX(0);
+            spin.setY(0);
+            spin.setZ(0);
+        }
+        frozen = false;
+    }
+
     public void recordTouch(Player player, TeamSide team) {
         recordTouch(player.getUniqueId(), team);
     }
@@ -549,6 +580,13 @@ public final class Ball {
         }
     }
 
+    /** Stops all linear and spin motion without freezing simulation (trap at feet). */
+    public void haltMotion() {
+        velocity.zero();
+        spin.zero();
+        frozen = false;
+    }
+
     public boolean isOnGround() {
         return onGround;
     }
@@ -571,5 +609,17 @@ public final class Ball {
 
     public ItemDisplay getEntity() {
         return display;
+    }
+
+    public boolean hadBlockCollisionThisTick() {
+        return blockCollisionThisTick;
+    }
+
+    public void suppressGoalScoringUntil(long untilTick) {
+        suppressGoalUntilTick = Math.max(suppressGoalUntilTick, untilTick);
+    }
+
+    public boolean isGoalScoringSuppressed(long currentTick) {
+        return suppressGoalUntilTick >= currentTick;
     }
 }

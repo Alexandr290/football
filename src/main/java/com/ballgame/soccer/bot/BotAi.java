@@ -5,6 +5,7 @@ import com.ballgame.soccer.ball.Ball;
 import com.ballgame.soccer.event.BallKickEvent;
 import com.ballgame.soccer.game.BotDifficulty;
 import com.ballgame.soccer.game.Game;
+import com.ballgame.soccer.game.GameState;
 import com.ballgame.soccer.game.SoccerPlayer;
 import com.ballgame.soccer.game.TeamSide;
 import com.ballgame.soccer.util.Cuboid;
@@ -45,14 +46,26 @@ public final class BotAi {
     /** Keep teammates at least this far apart (blocks). */
     private static final double TEAMMATE_SEP_MIN = 2.0;
     private static final double TEAMMATE_SEP_TARGET = 3.5;
+    /** Outfield bots stay at least this far in front of their goal line. */
+    private static final double KEEPER_SEPARATION_RADIUS = 7.5;
     /** Field inset when checking kicks/passes so bots stay away from touchlines. */
     private static final double PATH_INSET = 2.0;
     /** Only switch chaser when a teammate is this many blocks closer (reduces yo-yo). */
     private static final double CHASER_SWITCH_MARGIN = 4.0;
-    /** How far in front of the goal line the keeper may advance to cut angles. */
-    private static final double KEEPER_MAX_ADVANCE = 5.0;
-    /** Radius (around own goal) inside which the keeper will sweep out to claim. */
-    private static final double KEEPER_CLAIM_RADIUS = 12.5;
+    /** How far in front of the goal line the keeper may advance (blocks). */
+    private static final double KEEPER_MAX_ADVANCE = 3.0;
+    /** Loose balls within this depth from the goal line may trigger a short rush. */
+    private static final double KEEPER_CLAIM_DEPTH = 2.8;
+    /** Horizontal distance at which a nearby ball triggers a sweep. */
+    private static final double KEEPER_NEARBY_RADIUS = 5.0;
+
+    private enum PassStyle { GROUND, STRONG, LOFT, CROSS }
+    /** Ticks ahead to predict the ball for reflex saves. */
+    private static final int KEEPER_PREDICT_TICKS = 5;
+    /** Modest reach boost on incoming shots. */
+    private static final double KEEPER_ALERT_REACH_BONUS = 1.08;
+    /** Base save rate for incoming shots (Medium). */
+    private static final double KEEPER_SAVE_RATE_MEDIUM = 0.68;
 
     /** Per-team ball chaser resolution result. */
     public record BallChaserState(UUID botId, boolean humanChasing) {
@@ -62,7 +75,8 @@ public final class BotAi {
     }
 
     static void think(Game game, MatchBot bot, long matchTick) {
-        if (!game.getState().isLive() || game.isCelebrating() || !bot.canAct()) {
+        GameState state = game.getState();
+        if ((!state.isLive() && state != GameState.KICKOFF) || game.isCelebrating()) {
             return;
         }
         Ball ball = game.getBall();
@@ -81,12 +95,13 @@ public final class BotAi {
         double distToBall = horizontalDistance(self, ballLoc);
         TeamSide possession = ball.getLastTouchTeam();
 
-        // Goalkeeper only tracks the ball — never joins the outfield swarm.
+        // Goalkeeper tracks the ball every tick — saves must not wait on action cooldown.
         if (isGoalkeeper(bot)) {
             handleGoalkeeper(game, bot, ball, ballLoc, ownGoal, oppGoal, matchTick);
             return;
         }
 
+        boolean canKick = bot.canAct();
         UUID chaserId = game.getBallChaserBotId(team);
         boolean humanChases = game.isHumanChasingBall(team);
         boolean isChaser = !humanChases && bot.getUuid().equals(chaserId);
@@ -103,9 +118,9 @@ public final class BotAi {
             return;
         }
         if (possession == team || possession == null) {
-            handleAttack(game, bot, ballLoc, oppGoal, ownGoal, distToBall, matchTick);
+            handleAttack(game, bot, ballLoc, oppGoal, ownGoal, distToBall, matchTick, canKick);
         } else {
-            handlePress(game, bot, ball, ballLoc, oppGoal, distToBall, matchTick);
+            handlePress(game, bot, ball, ballLoc, oppGoal, distToBall, matchTick, canKick);
         }
     }
 
@@ -150,7 +165,9 @@ public final class BotAi {
             }
             double dist = horizontalDistance(loc, ballLoc);
             double roleWeight = bot.getRole().chaseWeight();
-            if (bot.getRole() == BotRole.DEFENDER && ballProgress > 0.52) {
+            if (bot.getRole() == BotRole.DEFENDER && ballProgress < 0.40) {
+                roleWeight *= 0.06;
+            } else if (bot.getRole() == BotRole.DEFENDER && ballProgress > 0.52) {
                 roleWeight *= 0.12;
             }
             if (bot.getRole() == BotRole.MIDFIELDER && ballProgress > 0.68) {
@@ -242,27 +259,36 @@ public final class BotAi {
         KeeperRead read = readKeeperSituation(game, bot.getTeam(), ball, ballLoc, ownGoal, oppGoal);
         Location self = bot.getLocation();
 
-        boolean rush = shouldKeeperRush(game, bot, ball, ballLoc, ownGoal);
-        Location target = rush
-                ? interceptPoint(ball, ballLoc, self, true, bot.getAttributes().anticipation)
-                : read.target();
+        boolean rush = shouldKeeperRush(game, bot, ball, ballLoc, ownGoal, oppGoal);
         boolean alert = read.alert() || rush;
 
         bot.faceLocation(ballLoc);
 
+        Location target = rush
+                ? interceptPoint(ball, ballLoc, self, true, bot.getAttributes().anticipation)
+                : read.target();
+        target = clampKeeperTarget(game, bot.getTeam(), target, ownGoal, oppGoal);
+
         double distToTarget = horizontalDistance(self, target);
         if (rush) {
-            bot.moveToward(target, sprintDecision(bot, distToTarget, 0.6, 1.0), game.getSettings());
-        } else if (distToTarget > 0.55) {
-            double urgency = alert ? 1.0 : 0.55;
-            bot.moveToward(target, sprintDecision(bot, distToTarget, 0.8, urgency), game.getSettings());
-        } else if (distToTarget > 0.25) {
-            bot.moveToward(target, false, game.getSettings());
+            bot.moveToward(target, sprintDecision(bot, distToTarget, 2.2, 0.55), game.getSettings());
+        } else if (distToTarget > 0.5) {
+            boolean sprint = alert && sprintDecision(bot, distToTarget, 2.8, 0.5);
+            bot.moveToward(target, sprint, game.getSettings());
         } else {
             bot.holdPosition();
         }
 
         attemptGoalkeeperCatch(game, bot, ball, ballLoc, alert, matchTick);
+    }
+
+    public static double keeperDepthFromGoalLine(Game game, TeamSide team, Location loc) {
+        if (game == null || team == null || loc == null) {
+            return 0.0;
+        }
+        Location ownGoal = goalCenter(game.getArena(), team);
+        Location oppGoal = goalCenter(game.getArena(), team.opposite());
+        return depthFromGoalLine(game, team, loc, ownGoal, oppGoal);
     }
 
     /**
@@ -271,29 +297,96 @@ public final class BotAi {
      * keeper comes out to smother a through-ball or beat a striker to it.
      */
     private static boolean shouldKeeperRush(Game game, MatchBot bot, Ball ball, Location ballLoc,
-                                            Location ownGoal) {
+                                            Location ownGoal, Location oppGoal) {
         Location self = bot.getLocation();
         if (self == null || ballLoc == null) {
             return false;
         }
-        double ballToGoal = horizontalDistance(ballLoc, ownGoal);
-        if (ballToGoal > KEEPER_CLAIM_RADIUS) {
+        double ballDepth = depthFromGoalLine(game, bot.getTeam(), ballLoc, ownGoal, oppGoal);
+        if (ballDepth > KEEPER_CLAIM_DEPTH || ballDepth < -0.8) {
             return false;
         }
         double keeperToBall = horizontalDistance(self, ballLoc);
-        if (keeperToBall > KEEPER_CLAIM_RADIUS - 2.0) {
+        if (keeperToBall > KEEPER_NEARBY_RADIUS) {
             return false;
         }
-        // Don't charge out for a ball that is already trickling behind the goal line.
-        double selfToGoal = horizontalDistance(self, ownGoal);
-        if (ballToGoal > selfToGoal + 3.0) {
-            return false;
+        double ballSpeed = ball != null ? ball.getSpeed() : 0.0;
+        if (keeperToBall <= KEEPER_NEARBY_RADIUS && ballSpeed < 0.85) {
+            return true;
         }
         double oppToBall = nearestOpponentDistance(game, bot.getTeam(), ballLoc);
-        double ballSpeed = ball != null ? ball.getSpeed() : 0.0;
-        boolean canWin = keeperToBall <= oppToBall + 0.6;
-        boolean loose = ballSpeed < 0.55 && keeperToBall < 6.5;
-        return canWin || loose;
+        return keeperToBall <= oppToBall + 0.5 && ballDepth > 0.4;
+    }
+
+    /** Signed distance in front of the goal line (0 = on line, positive = into the pitch). */
+    private static double depthFromGoalLine(Game game, TeamSide team, Location loc,
+                                            Location ownGoal, Location oppGoal) {
+        if (loc == null) {
+            return Double.MAX_VALUE;
+        }
+        Location line = goalLineSpot(game.getArena(), team);
+        if (line == null) {
+            line = keeperPost(game, team, null, ownGoal, oppGoal);
+        }
+        if (line == null) {
+            return horizontalDistance(loc, ownGoal);
+        }
+        Vector fieldDir = flatDirection(line, oppGoal);
+        if (fieldDir.lengthSquared() < 1e-6) {
+            return 0.0;
+        }
+        fieldDir.normalize();
+        Vector rel = loc.toVector().subtract(line.toVector());
+        rel.setY(0);
+        return rel.dot(fieldDir);
+    }
+
+    /** Keeps a human or bot keeper inside the box in front of the goal mouth. */
+    public static Location clampKeeperPosition(Game game, TeamSide team, Location loc) {
+        if (game == null || team == null || loc == null) {
+            return loc;
+        }
+        Location ownGoal = goalCenter(game.getArena(), team);
+        Location oppGoal = goalCenter(game.getArena(), team.opposite());
+        return clampKeeperTarget(game, team, loc, ownGoal, oppGoal);
+    }
+
+    /** Hard cap: the keeper never leaves a 3-block-deep box in front of his goal mouth. */
+    private static Location clampKeeperTarget(Game game, TeamSide team, Location target,
+                                              Location ownGoal, Location oppGoal) {
+        if (target == null) {
+            return null;
+        }
+        Location line = goalLineSpot(game.getArena(), team);
+        if (line == null) {
+            line = keeperPost(game, team, null, ownGoal, oppGoal);
+        }
+        if (line == null) {
+            return target;
+        }
+
+        Vector fieldDir = flatDirection(line, oppGoal);
+        if (fieldDir.lengthSquared() < 1e-6) {
+            fieldDir = new Vector(0, 0, 1);
+        }
+        fieldDir.normalize();
+        Vector lateral = new Vector(-fieldDir.getZ(), 0, fieldDir.getX());
+
+        Vector rel = target.toVector().subtract(line.toVector());
+        rel.setY(0);
+        double depth = Math.max(0.0, Math.min(KEEPER_MAX_ADVANCE, rel.dot(fieldDir)));
+        double side = rel.dot(lateral);
+
+        Cuboid goal = game.getArena().getGoal(team);
+        double halfWidth = goalHalfWidth(goal, line, oppGoal);
+        double maxSide = Math.max(0.5, halfWidth - 0.25);
+        side = Math.max(-maxSide, Math.min(maxSide, side));
+
+        Location clamped = line.clone()
+                .add(fieldDir.clone().multiply(depth))
+                .add(lateral.clone().multiply(side));
+        clamped.setY(line.getY());
+        return clampNearGoalMouth(goal, clamped, fieldDir);
     }
 
     /** Spawn position centred on the goal line, facing the pitch. */
@@ -387,15 +480,17 @@ public final class BotAi {
         }
         fieldDir.normalize();
         Vector lateral = new Vector(-fieldDir.getZ(), 0, fieldDir.getX());
+        Cuboid goal = game.getArena().getGoal(team);
 
         if (ballLoc != null) {
             Vector relativeBall = ballLoc.toVector().subtract(post.toVector());
             relativeBall.setY(0);
             double shift = relativeBall.dot(lateral);
-            post.add(lateral.clone().multiply(Math.max(-6.0, Math.min(6.0, shift))));
+            double halfWidth = goalHalfWidth(goal, post, oppGoal);
+            double maxSide = Math.max(0.5, halfWidth - 0.25);
+            post.add(lateral.clone().multiply(Math.max(-maxSide, Math.min(maxSide, shift))));
             post.setY(Math.max(post.getY(), ballLoc.getY()));
         }
-        Cuboid goal = game.getArena().getGoal(team);
         return clampNearGoalMouth(goal, post, fieldDir);
     }
 
@@ -420,25 +515,27 @@ public final class BotAi {
 
     private static KeeperRead readKeeperSituation(Game game, TeamSide team, Ball ball, Location ballLoc,
                                                   Location ownGoal, Location oppGoal) {
-        Location centerPost = keeperPost(game, team, null, ownGoal, oppGoal);
-        if (ball == null || ballLoc == null || centerPost == null) {
-            return new KeeperRead(centerPost, false);
+        Location center = goalLineSpot(game.getArena(), team);
+        if (center == null) {
+            center = keeperPost(game, team, null, ownGoal, oppGoal);
+        }
+        if (ball == null || ballLoc == null || center == null) {
+            return new KeeperRead(center, false);
         }
 
         Cuboid goal = game.getArena().getGoal(team);
-        double halfWidth = goalHalfWidth(goal, centerPost, oppGoal);
-        Vector fieldDir = flatDirection(centerPost, oppGoal);
+        double halfWidth = goalHalfWidth(goal, center, oppGoal);
+        Vector fieldDir = flatDirection(center, oppGoal);
         if (fieldDir.lengthSquared() < 1e-6) {
             fieldDir = new Vector(0, 0, 1);
         }
         fieldDir.normalize();
         Vector lateral = new Vector(-fieldDir.getZ(), 0, fieldDir.getX());
 
-        Vector rel = ballLoc.toVector().subtract(centerPost.toVector());
+        Vector rel = ballLoc.toVector().subtract(center.toVector());
         rel.setY(0);
-        double depth = rel.dot(fieldDir);     // positive = in front of goal, negative = behind goal
+        double depth = rel.dot(fieldDir);
         double side = rel.dot(lateral);
-        double ballDist = Math.max(0.3, Math.hypot(depth, side));
 
         Vector vel = ball.getVelocity();
         vel.setY(0);
@@ -449,7 +546,6 @@ public final class BotAi {
         boolean centralDanger = depth > -0.8 && depth < 12.0 && Math.abs(side) <= halfWidth + 1.6;
         boolean shotTowardGoal = false;
         double targetSide = side;
-
         if (towardGoalSpeed > 0.04 && speed > 0.14 && depth > -1.0 && depth < 36.0) {
             double ticksToLine = depth / towardGoalSpeed;
             double predictedSide = side + lateralSpeed * ticksToLine;
@@ -461,28 +557,24 @@ public final class BotAi {
             }
         }
 
-        // Stand on the line between the ball and the centre of the goal, stepping
-        // off the line to cut the angle. Come further out the further the ball is,
-        // but cap it so he is never stranded in no-man's-land.
-        double maxSide = Math.max(0.0, halfWidth - 0.25);
-        double clampedSide = Math.max(-maxSide, Math.min(maxSide, targetSide * 0.92));
-        double advance = Math.max(0.8, Math.min(KEEPER_MAX_ADVANCE, ballDist * 0.30));
-        if (shotTowardGoal) {
-            // Step out a touch more to meet a developing shot, then set.
-            advance = Math.min(KEEPER_MAX_ADVANCE, advance + Math.min(2.0, depth / 12.0));
-        }
-        if (depth < 0) {
-            // Ball level with or behind the line: sit on the line and just track across.
-            advance = 0.4;
-        }
-
-        Location target = centerPost.clone()
-                .add(lateral.clone().multiply(clampedSide))
-                .add(fieldDir.clone().multiply(advance));
-        target.setY(centerPost.getY());
-
         boolean alert = centralDanger || shotTowardGoal;
-        return new KeeperRead(clampToField(game.getArena(), target), alert);
+        double maxSide = Math.max(0.35, halfWidth - 0.35);
+        double lateralWeight = alert ? 0.82 : (depth > 14.0 ? 0.15 : 0.45);
+        double clampedSide = Math.max(-maxSide, Math.min(maxSide, targetSide * lateralWeight));
+
+        double forward = 0.4;
+        if (alert && depth > 0 && depth < 20.0) {
+            forward = Math.min(KEEPER_MAX_ADVANCE, 0.4 + depth * 0.10);
+        } else if (depth > 14.0) {
+            forward = 0.4;
+            clampedSide *= 0.3;
+        }
+
+        Location target = center.clone()
+                .add(fieldDir.clone().multiply(forward))
+                .add(lateral.clone().multiply(clampedSide));
+        target.setY(center.getY());
+        return new KeeperRead(clampKeeperTarget(game, team, target, ownGoal, oppGoal), alert);
     }
 
     private static double goalHalfWidth(Cuboid goal, Location centerPost, Location oppGoal) {
@@ -494,23 +586,24 @@ public final class BotAi {
             return 2.6;
         }
         fieldDir.normalize();
-        return Math.abs(fieldDir.getX()) >= Math.abs(fieldDir.getZ())
+        double raw = Math.abs(fieldDir.getX()) >= Math.abs(fieldDir.getZ())
                 ? Math.max(1.2, goal.getSizeZ() * 0.5)
                 : Math.max(1.2, goal.getSizeX() * 0.5);
+        // Cap only absurd goal regions (whole end-line); normal mouths stay full width.
+        return Math.min(6.0, raw);
     }
 
-    /**
-     * Reliable shot-stopping. A "smart" keeper claims nearly everything he can
-     * physically reach; only genuinely fast, well-placed strikes near the edge of
-     * his reach beat him. On a clean claim he immediately distributes the ball.
-     */
     private static void attemptGoalkeeperCatch(Game game, MatchBot bot, Ball ball, Location ballLoc,
                                                boolean alert, long matchTick) {
-        if (!bot.canAct() || ballLoc == null || bot.getLocation() == null) {
+        if (ballLoc == null || bot.getLocation() == null) {
             return;
         }
-        double dist = horizontalDistance(bot.getLocation(), ballLoc);
-        double vert = Math.abs(bot.getLocation().getY() - ballLoc.getY());
+        Location keeperLoc = bot.getLocation();
+        Location ownGoal = goalCenter(game.getArena(), bot.getTeam());
+        Location oppGoal = goalCenter(game.getArena(), bot.getTeam().opposite());
+
+        double dist = horizontalDistance(keeperLoc, ballLoc);
+        double vert = Math.abs(keeperLoc.getY() - ballLoc.getY());
         BotDifficulty difficulty = game.getBotDifficulty(bot.getTeam());
         double reach = Math.max(1.85, game.getSettings().kickReach * 1.0);
         if (difficulty == BotDifficulty.EASY) {
@@ -522,16 +615,19 @@ public final class BotAi {
             return;
         }
         double speed = ball != null ? ball.getSpeed() : 0.0;
-        // Only act on balls that are a threat or genuinely within control range —
-        // don't grab harmless balls dribbled around the edge of the box.
         if (!alert && speed < 0.45 && dist > reach * 0.8) {
             return;
         }
 
+        double lateralPenalty = shotLateralDifficulty(keeperLoc, ballLoc, ownGoal, oppGoal);
+        if (lateralPenalty > 0.82 && dist > reach * 0.62) {
+            return;
+        }
+
         double quality = 0.82 + bot.getAttributes().anticipation * 0.10 + bot.getAttributes().agility * 0.05;
-        // Hard, placed shots at the limit of his reach can still beat him.
         quality -= Math.max(0.0, speed - 0.9) * 0.12;
         quality -= Math.max(0.0, dist / reach - 0.7) * 0.18;
+        quality -= lateralPenalty * 0.12;
         if (difficulty == BotDifficulty.EASY) {
             quality -= 0.34;
             quality -= Math.max(0.0, speed - 0.55) * 0.22;
@@ -546,13 +642,29 @@ public final class BotAi {
             quality = Math.max(0.88, Math.min(0.995, quality));
         }
         if (keeperMistakeRoll(bot, matchTick) > quality) {
-            // Parry: he gets a touch but doesn't gather it cleanly.
             bot.setActionCooldown(5);
             return;
         }
         game.botGoalkeeperSave(bot);
-        // Recover quickly so he can reset on his line for any counter-attack.
         bot.setActionCooldown(8);
+    }
+
+    /** 0 = central save; higher = shot dragged wide, harder to reach. */
+    private static double shotLateralDifficulty(Location keeperLoc, Location ballLoc,
+                                                Location ownGoal, Location oppGoal) {
+        if (keeperLoc == null || ballLoc == null || ownGoal == null || oppGoal == null) {
+            return 0.0;
+        }
+        Vector fieldDir = flatDirection(ownGoal, oppGoal);
+        if (fieldDir.lengthSquared() < 1e-6) {
+            return 0.0;
+        }
+        fieldDir.normalize();
+        Vector lateral = new Vector(-fieldDir.getZ(), 0, fieldDir.getX());
+        Vector rel = ballLoc.toVector().subtract(keeperLoc.toVector());
+        rel.setY(0);
+        double side = Math.abs(rel.dot(lateral));
+        return Math.max(0.0, side - 1.0) * 0.18;
     }
 
     /**
@@ -576,6 +688,24 @@ public final class BotAi {
             return nearest;
         }
 
+        Location ownGoal = goalCenter(game.getArena(), team);
+        Location oppGoal = goalCenter(game.getArena(), team.opposite());
+        return keeperClearanceFallback(game, team, from, ownGoal, oppGoal);
+    }
+
+    /** Upfield punch when the keeper smothers a loose ball off his line. */
+    public static Location keeperClearanceTarget(Game game, MatchBot keeper) {
+        if (game == null || keeper == null) {
+            return null;
+        }
+        TeamSide team = keeper.getTeam();
+        Location from = game.getBallLocation();
+        if (from == null) {
+            from = keeper.getLocation();
+        }
+        if (from == null) {
+            return null;
+        }
         Location ownGoal = goalCenter(game.getArena(), team);
         Location oppGoal = goalCenter(game.getArena(), team.opposite());
         return keeperClearanceFallback(game, team, from, ownGoal, oppGoal);
@@ -684,7 +814,7 @@ public final class BotAi {
         double humanBonus = isHuman ? 0.6 : 0.0;
         double score = forwardProgress * 2.2 + openness * 1.6 + roleFit * 0.4 + humanBonus
                 - Math.max(0.0, dist - 45.0) * 0.01;
-        return new PassOption(target, score, 0.0, false, 0.0, isHuman);
+        return new PassOption(target, score, 0.0, false, 0.0, isHuman, PassStyle.GROUND);
     }
 
     /** Big clearance into the more open channel up the field when nobody is on. */
@@ -739,7 +869,8 @@ public final class BotAi {
     // ==================================================================
 
     private static void handleAttack(Game game, MatchBot bot, Location ballLoc, Location oppGoal,
-                                     Location ownGoal, double distToBall, long matchTick) {
+                                     Location ownGoal, double distToBall, long matchTick,
+                                     boolean canKick) {
         bot.faceLocation(oppGoal);
         Location self = bot.getLocation();
         double goalDist = horizontalDistance(self, oppGoal);
@@ -747,15 +878,59 @@ public final class BotAi {
         double goalAngle = angleToGoal(self, oppGoal);
         int pressure = countOpponentsNear(game, bot.getTeam(), ballLoc, 4.5);
         BotDifficulty difficulty = game.getBotDifficulty(bot.getTeam());
+        double kickReach = game.getSettings().kickReach;
+        boolean hasBall = distToBall <= kickReach * 1.05;
+        boolean underPressure = pressure >= 1;
 
-        if (difficulty == BotDifficulty.EASY && aiRoll(bot, matchTick, 0xE45A) < 0.16) {
-            bot.holdPosition();
-            bot.setActionCooldown(3);
+        if (!canKick && hasBall) {
+            Vector carry = dribbleDirection(self, oppGoal, ownGoal, game, bot.getTeam());
+            bot.moveToward(curvedAdvance(self, oppGoal, carry, game, bot.getTeam()),
+                    sprintDecision(bot, goalDist, 10.0, underPressure ? 0.7 : 0.5), game.getSettings());
+            return;
+        }
+        if (!canKick && !hasBall) {
+            bot.moveToward(ballLoc, sprintDecision(bot, distToBall, 4.0, 0.75), game.getSettings());
+            return;
+        }
+
+        PassOption pass = findBestPass(game, bot, ballLoc, oppGoal, ownGoal);
+        if (pass != null) {
+            double targetGoalDist = horizontalDistance(pass.target(), oppGoal);
+            boolean throughBall = targetGoalDist < goalDist - 0.8;
+            boolean teammateAhead = targetGoalDist < goalDist - 0.3;
+            boolean passToHuman = pass.receiverHuman();
+            boolean playmaker = bot.getRole().passBias() >= 0.45;
+            boolean inOwnHalf = ownDist < goalDist;
+            boolean shouldPass = throughBall || teammateAhead || underPressure || passToHuman
+                    || pass.score() > 0.45
+                    || (hasBall && pass.score() > 0.12)
+                    || (playmaker && pass.score() > 0.28)
+                    || (inOwnHalf && pass.score() > 0.18);
+            if (difficulty == BotDifficulty.EASY) {
+                shouldPass = shouldPass && pass.score() > 0.38;
+            } else if (difficulty == BotDifficulty.HARD) {
+                shouldPass = shouldPass || pass.score() > 0.15 || (throughBall && pass.score() > 0.08);
+            }
+
+            if (shouldPass && isSafeBallPath(game, ballLoc, pass.target(), PATH_INSET)
+                    && !kickThreatensOwnGoal(ballLoc, pass.target(), ownGoal)) {
+                executePass(game, bot, pass, ballLoc, distToBall);
+                return;
+            }
+        }
+
+        if (hasBall && underPressure && pass == null) {
+            Vector carry = dribbleDirection(self, oppGoal, ownGoal, game, bot.getTeam());
+            bot.faceDirection(carry);
+            game.botDribble(bot);
+            Location escape = curvedAdvance(self, oppGoal, carry, game, bot.getTeam());
+            bot.moveToward(escape, sprintDecision(bot, pressure, 2.0, 0.8), game.getSettings());
+            bot.setActionCooldown(1);
             return;
         }
 
         if (difficulty == BotDifficulty.HARD
-                && distToBall <= game.getSettings().kickReach * 1.15
+                && distToBall <= kickReach * 1.15
                 && goalDist < 31.0
                 && goalAngle < 72.0
                 && ownDist > goalDist
@@ -769,97 +944,75 @@ public final class BotAi {
             }
         }
 
-        PassOption pass = findBestPass(game, bot, ballLoc, oppGoal, ownGoal);
-        if (pass != null) {
-            double targetGoalDist = horizontalDistance(pass.target(), oppGoal);
-            boolean throughBall = targetGoalDist < goalDist - 0.8;
-            boolean teammateAhead = targetGoalDist < goalDist - 0.3;
-            boolean passToHuman = pass.receiverHuman();
-            boolean underPressure = pressure >= 1;
-            boolean playmaker = bot.getRole().passBias() >= 0.45;
-            boolean inOwnHalf = ownDist < goalDist;
-            boolean shouldPass = throughBall || teammateAhead || underPressure || passToHuman
-                    || pass.score() > 0.5
-                    || (playmaker && pass.score() > 0.32)
-                    || (inOwnHalf && pass.score() > 0.25);
-            if (difficulty == BotDifficulty.EASY) {
-                shouldPass = shouldPass && pass.score() > 0.55;
-            } else if (difficulty == BotDifficulty.HARD) {
-                shouldPass = shouldPass || pass.score() > 0.22 || (throughBall && pass.score() > 0.12);
-            }
-
-            if (shouldPass && isSafeBallPath(game, ballLoc, pass.target(), PATH_INSET)
-                    && !kickThreatensOwnGoal(ballLoc, pass.target(), ownGoal)) {
-                bot.faceLocation(pass.target());
-                if (distToBall <= game.getSettings().kickReach * 1.05) {
-                    if (pass.strongKick()) {
-                        game.botStrongPassAt(bot, pass.target(), pass.charge(), pass.lift());
-                    } else {
-                        game.botPassAt(bot, pass.target(), pass.charge());
-                    }
-                    bot.setActionCooldown(12);
-                } else {
-                    bot.moveToward(ballLoc, sprintDecision(bot, distToBall, 3.0, 0.65), game.getSettings());
-                }
-                return;
-            }
-        }
-
         double directShotRange = switch (difficulty) {
             case EASY -> 14.0;
             case MEDIUM -> 22.0;
             case HARD -> 31.0;
         };
-        if (distToBall <= game.getSettings().kickReach * 1.05 && goalDist < directShotRange
+        if (hasBall && goalDist < directShotRange
                 && ownDist > goalDist && avoidsOwnGoal(self, oppGoal, ownGoal)) {
             Location aim = shotAimPoint(game, bot, ballLoc, oppGoal);
             if (aimsAtOpponentGoal(self, aim, ownGoal, oppGoal)
                     && isSafeBallPath(game, ballLoc, aim, PATH_INSET * 0.85)) {
                 shootAtGoal(game, bot, oppGoal, ownGoal, goalDist, aim);
-                bot.setActionCooldown(16);
+                bot.setActionCooldown(14);
                 return;
             }
         }
 
         if (shouldShoot(game, bot, goalDist, goalAngle, pressure, ownDist, matchTick)
                 && avoidsOwnGoal(self, oppGoal, ownGoal)) {
-            bot.moveToward(ballLoc, false, game.getSettings());
+            if (!hasBall) {
+                bot.moveToward(ballLoc, sprintDecision(bot, distToBall, 3.0, 0.7), game.getSettings());
+            }
             bot.faceLocation(oppGoal);
-            if (distToBall <= game.getSettings().kickReach * 1.05) {
+            if (hasBall) {
                 Location aim = shotAimPoint(game, bot, ballLoc, oppGoal);
                 if (aimsAtOpponentGoal(self, aim, ownGoal, oppGoal)
                         && isSafeBallPath(game, ballLoc, aim, PATH_INSET * 0.85)) {
                     shootAtGoal(game, bot, oppGoal, ownGoal, goalDist, aim);
-                    bot.setActionCooldown(16);
+                    bot.setActionCooldown(14);
                 }
             }
             return;
         }
 
-        if (distToBall <= game.getSettings().kickReach * 1.05) {
+        if (hasBall) {
             Vector carry = dribbleDirection(self, oppGoal, ownGoal, game, bot.getTeam());
             bot.faceDirection(carry);
             game.botDribble(bot);
-            bot.setActionCooldown(2);
-            if (goalDist > 6.0) {
-                Location advance = curvedAdvance(self, oppGoal, carry, game, bot.getTeam());
-                double space = pressure == 0 ? 0.75 : 0.4;
-                bot.moveToward(advance, sprintDecision(bot, goalDist, 10.0, space), game.getSettings());
-            }
+            bot.setActionCooldown(1);
+            Location advance = curvedAdvance(self, oppGoal, carry, game, bot.getTeam());
+            double space = pressure == 0 ? 0.85 : 0.55;
+            bot.moveToward(advance, sprintDecision(bot, goalDist, 12.0, space), game.getSettings());
             return;
         }
 
         bot.moveToward(ballLoc, sprintDecision(bot, distToBall, 4.0, 0.75), game.getSettings());
     }
 
+    private static void executePass(Game game, MatchBot bot, PassOption pass,
+                                    Location ballLoc, double distToBall) {
+        bot.faceLocation(pass.target());
+        if (distToBall <= game.getSettings().kickReach * 1.05) {
+            switch (pass.style()) {
+                case LOFT -> game.botLoftPassAt(bot, pass.target());
+                case CROSS -> game.botCrossPassAt(bot, pass.target());
+                case STRONG -> game.botStrongPassAt(bot, pass.target(), pass.charge(), pass.lift());
+                default -> game.botPassAt(bot, pass.target(), pass.charge());
+            }
+            bot.setActionCooldown(5);
+        } else {
+            bot.moveToward(ballLoc, sprintDecision(bot, distToBall, 3.0, 0.65), game.getSettings());
+        }
+    }
+
     private static PassOption findBestPass(Game game, MatchBot bot, Location ballLoc,
                                            Location oppGoal, Location ownGoal) {
         PassOption best = null;
-        double bestScore = 0.10;
+        double bestScore = 0.08;
         UUID chaserId = game.getBallChaserBotId(bot.getTeam());
 
-        // Prefer real players when a safe lane exists. Aim at their current feet,
-        // not far ahead of them, so the ball arrives directly to the player.
         for (SoccerPlayer sp : game.getHumanParticipants()) {
             if (sp.getTeam() != bot.getTeam() || sp.isBot()) {
                 continue;
@@ -868,11 +1021,17 @@ public final class BotAi {
             if (player == null || !player.isOnline()) {
                 continue;
             }
-            PassOption option = scorePassTarget(game, bot, player.getLocation(), BotRole.STRIKER,
-                    ballLoc, oppGoal, ownGoal, true, false);
-            if (option != null && option.score() > bestScore) {
-                bestScore = option.score();
-                best = option;
+            Location loc = player.getLocation();
+            List<Location> candidates = leadCandidates(loc, player.getVelocity());
+            for (int i = 0; i < candidates.size(); i++) {
+                Location candidate = candidates.get(i);
+                boolean intoSpace = i > 0;
+                PassOption option = scorePassTarget(game, bot, candidate, BotRole.STRIKER,
+                        ballLoc, oppGoal, ownGoal, true, intoSpace);
+                if (option != null && option.score() > bestScore) {
+                    bestScore = option.score();
+                    best = option;
+                }
             }
         }
 
@@ -885,11 +1044,16 @@ public final class BotAi {
             if (loc == null) {
                 continue;
             }
-            PassOption option = scorePassTarget(game, bot, loc, teammate.getRole(),
-                    ballLoc, oppGoal, ownGoal, false, false);
-            if (option != null && option.score() > bestScore) {
-                bestScore = option.score();
-                best = option;
+            List<Location> candidates = leadCandidates(loc, teammate.getVelocity());
+            for (int i = 0; i < candidates.size(); i++) {
+                Location candidate = candidates.get(i);
+                boolean intoSpace = i > 0;
+                PassOption option = scorePassTarget(game, bot, candidate, teammate.getRole(),
+                        ballLoc, oppGoal, ownGoal, false, intoSpace);
+                if (option != null && option.score() > bestScore) {
+                    bestScore = option.score();
+                    best = option;
+                }
             }
         }
         return best;
@@ -935,20 +1099,42 @@ public final class BotAi {
         // A pass that takes the ball beyond the nearest defender breaks a line.
         double lineBreakBonus = breaksDefensiveLine(game, passer.getTeam(), ballLoc, targetLoc, oppGoal)
                 ? 0.6 : 0.0;
-        double spaceBonus = intoSpace && forwardProgress > 0 ? 0.5 : 0.0;
+        double spaceBonus = intoSpace && forwardProgress > 0 ? 0.85 : 0.0;
         double score = goalProgress * 1.8 + openness * 1.4 + roleFit * 0.45 + humanBonus
                 + forwardBonus + lineBreakBonus + spaceBonus
                 - distFromBall * 0.012 + passer.getRole().passBias() * 0.4;
         boolean lineBreakingPass = lineBreakBonus > 0.0 && distFromBall > 9.0;
-        boolean passIntoRun = intoSpace && forwardProgress > 0.08 && distFromBall > 10.0;
-        boolean strongKick = distFromBall > 16.0 || lineBreakingPass || passIntoRun;
+        boolean passIntoRun = intoSpace && forwardProgress > 0.05 && distFromBall > 8.0;
+
+        boolean crossCandidate = (passer.getRole() == BotRole.WINGER || passer.getRole() == BotRole.DEFENDER)
+                && (targetRole == BotRole.STRIKER || targetRole == BotRole.WINGER)
+                && distFromBall >= 12.0 && distFromBall <= 24.0
+                && targetGoalDist < 18.0 && forwardProgress > 0.05;
+        boolean loftCandidate = !crossCandidate && distFromBall > 13.0
+                && (lineBreakingPass || countOpponentsNear(game, passer.getTeam(), ballLoc, 5.0) >= 1)
+                && hasPassLane(game, passer.getTeam(), ballLoc, targetLoc);
+
+        PassStyle style;
+        if (crossCandidate && hasPassLane(game, passer.getTeam(), ballLoc, targetLoc)) {
+            style = PassStyle.CROSS;
+            score += 0.35;
+        } else if (loftCandidate) {
+            style = PassStyle.LOFT;
+            score += 0.25;
+        } else if (distFromBall > 16.0 || lineBreakingPass || passIntoRun) {
+            style = PassStyle.STRONG;
+        } else {
+            style = PassStyle.GROUND;
+        }
+
+        boolean strongKick = style == PassStyle.STRONG || style == PassStyle.LOFT || style == PassStyle.CROSS;
         double distanceFactor = clamp((distFromBall - 8.0) / 22.0, 0.0, 1.0);
         double situationalBoost = 0.0;
         if (lineBreakingPass) {
             situationalBoost += 0.07;
         }
         if (passIntoRun) {
-            situationalBoost += 0.05;
+            situationalBoost += 0.10;
         }
         double charge = strongKick
                 ? clamp(0.18 + distanceFactor * 0.24 + situationalBoost, 0.18, 0.52)
@@ -956,10 +1142,10 @@ public final class BotAi {
         if (charge < 0.26) {
             charge = 0.26;
         }
-        double lift = strongKick
+        double lift = style == PassStyle.STRONG
                 ? clamp(0.025 + distanceFactor * 0.06 + (lineBreakingPass ? 0.015 : 0.0), 0.02, 0.10)
                 : 0.0;
-        return new PassOption(targetLoc, score, charge, strongKick, lift, isHuman);
+        return new PassOption(targetLoc, score, charge, strongKick, lift, isHuman, style);
     }
 
     /** True when the target sits goal-side of the closest opponent to the ball. */
@@ -1095,13 +1281,13 @@ public final class BotAi {
 
         Location nearestOpp = nearestOpponentLocation(game, team, from);
         Vector direction;
-        if (nearestOpp != null && horizontalDistance(from, nearestOpp) < 3.5) {
+        if (nearestOpp != null && horizontalDistance(from, nearestOpp) < 4.5) {
             double side = Math.signum(toGoal.getX() * (nearestOpp.getX() - from.getX())
                     + toGoal.getZ() * (nearestOpp.getZ() - from.getZ()));
             if (Math.abs(side) < 0.1) {
                 side = 1.0;
             }
-            direction = toGoal.clone().multiply(0.62).add(lateral.clone().multiply(0.78 * -side)).normalize();
+            direction = toGoal.clone().multiply(0.45).add(lateral.clone().multiply(0.95 * -side)).normalize();
         } else {
             direction = toGoal;
         }
@@ -1135,14 +1321,16 @@ public final class BotAi {
     // ==================================================================
 
     private static void handlePress(Game game, MatchBot bot, Ball ball, Location ballLoc,
-                                    Location oppGoal, double distToBall, long matchTick) {
+                                    Location oppGoal, double distToBall, long matchTick,
+                                    boolean canKick) {
         Location ownGoal = goalCenter(game.getArena(), bot.getTeam());
         Location pressTarget = jockeyPoint(bot.getLocation(), ballLoc, oppGoal);
         double pressUrgency = 0.75 + bot.getAttributes().aggression * 0.25;
 
-        if (shouldSlideTackle(game, bot, ball, ballLoc, distToBall, matchTick)) {
+        if (canKick && shouldSlideTackle(game, bot, ball, ballLoc, distToBall, matchTick)) {
             bot.faceLocation(ballLoc);
             if (bot.slideTackleToward(ballLoc, matchTick)) {
+                game.onBotSlideTackle(bot);
                 Location clearTarget = safeClearanceTarget(game, ballLoc, oppGoal, ownGoal);
                 bot.faceLocation(clearTarget);
                 game.botKick(bot, BallKickEvent.KickType.TACKLE, 0);
@@ -1153,11 +1341,12 @@ public final class BotAi {
 
         bot.moveToward(pressTarget, sprintDecision(bot, distToBall, 1.5, pressUrgency), game.getSettings());
         bot.faceLocation(ballLoc);
-        if (distToBall <= game.getSettings().kickReach * 1.15) {
+        if (canKick && distToBall <= game.getSettings().kickReach * 0.85
+                && aiRoll(bot, matchTick, 0x7A3C) < 0.38) {
             Location clearTarget = safeClearanceTarget(game, ballLoc, oppGoal, ownGoal);
             bot.faceLocation(clearTarget);
             game.botKick(bot, BallKickEvent.KickType.TACKLE, 0);
-            bot.setActionCooldown(20);
+            bot.setActionCooldown(18);
         }
     }
 
@@ -1209,22 +1398,25 @@ public final class BotAi {
         int rank = supportRank(game, bot, ballLoc, chaserId);
 
         Location anchor;
-        if (attacking && rank >= 0 && rank < 2) {
-            // The closest spare players "group" near the carrier to receive.
+        if (attacking && rank >= 0 && rank < 3) {
+            // Closest spare players break shape to offer passing angles.
             anchor = supportPoint(game, bot, ballLoc, ownGoal, oppGoal, pf);
-        } else if (!attacking && rank == 0) {
-            // The next-nearest defender covers the space behind the presser.
-            anchor = coverPoint(game, ballLoc, ownGoal, pf);
+        } else if (attacking && (bot.getRole() == BotRole.STRIKER || bot.getRole() == BotRole.WINGER)) {
+            anchor = runInBehindPoint(game, bot, ballLoc, ownGoal, oppGoal, pf);
+        } else if (!attacking && rank == 0 && bot.getRole() == BotRole.DEFENDER) {
+            anchor = coverPoint(game, bot, ballLoc, ownGoal, oppGoal, pf);
         } else {
             anchor = formationAnchor(game, bot, ballLoc, ownGoal, oppGoal, pf, attacking);
         }
 
+        anchor = clampAwayFromOwnGoal(game, bot, anchor, ownGoal, oppGoal);
         anchor = spreadFromTeammates(game, bot, anchor);
+        anchor = spreadFromOpponents(game, bot, anchor);
         anchor = clampToField(game.getArena(), anchor);
 
         double distToAnchor = horizontalDistance(bot.getLocation(), anchor);
-        double runUrgency = distToAnchor > 12.0 ? 0.9 : 0.45 + bot.getAttributes().workRate * 0.25;
-        bot.moveToward(anchor, sprintDecision(bot, distToAnchor, 4.0, runUrgency), game.getSettings());
+        double runUrgency = distToAnchor > 10.0 ? 0.95 : 0.65 + bot.getAttributes().workRate * 0.25;
+        bot.moveToward(anchor, sprintDecision(bot, distToAnchor, 2.0, runUrgency), game.getSettings());
         bot.faceLocation(ballLoc);
     }
 
@@ -1305,47 +1497,114 @@ public final class BotAi {
         return formationAnchor(game, bot, ballLoc, ownGoal, oppGoal, pf, true);
     }
 
-    /** Sit goal-side of the ball to screen the goal as the second defender. */
-    private static Location coverPoint(Game game, Location ballLoc, Location ownGoal, PitchFrame pf) {
+    /** Strikers and wingers make diagonal runs in behind the defensive line. */
+    private static Location runInBehindPoint(Game game, MatchBot bot, Location ballLoc,
+                                             Location ownGoal, Location oppGoal, PitchFrame pf) {
+        Vector toOpp = flatDirection(ballLoc, oppGoal);
+        if (toOpp.lengthSquared() < 1e-6) {
+            toOpp = pf.forward().clone();
+        }
+        toOpp.normalize();
+        Vector lateral = new Vector(-toOpp.getZ(), 0, toOpp.getX());
+
+        BotFormation formation = game.getFormation(bot.getTeam());
+        double laneFrac = formation != null ? formation.slot(bot.getFormationSlot()).lane() : 0.0;
+        double side = Math.signum(laneFrac == 0.0 ? (bot.getFormationSlot() % 2 == 0 ? 1.0 : -1.0) : laneFrac);
+
+        Location run = ballLoc.clone()
+                .add(toOpp.clone().multiply(10.0 + bot.getAttributes().anticipation * 4.0))
+                .add(lateral.clone().multiply(5.5 * side));
+        run.setY(ballLoc.getY());
+        if (hasPassLane(game, bot.getTeam(), ballLoc, run)
+                && insideFieldInset(game.getArena().getField(), run, PATH_INSET)) {
+            return run;
+        }
+        return supportPoint(game, bot, ballLoc, ownGoal, oppGoal, pf);
+    }
+
+    /** One covering centre-back steps goal-side of the ball; uses formation width. */
+    private static Location coverPoint(Game game, MatchBot bot, Location ballLoc, Location ownGoal,
+                                       Location oppGoal, PitchFrame pf) {
         Vector toOwn = flatDirection(ballLoc, ownGoal);
         if (toOwn.lengthSquared() < 1e-6) {
             toOwn = pf.forward().clone().multiply(-1);
         }
         toOwn.normalize();
-        Location cover = ballLoc.clone().add(toOwn.multiply(5.5));
+        Location cover = ballLoc.clone().add(toOwn.multiply(5.0));
         cover.setY(ballLoc.getY());
+
+        BotFormation formation = game.getFormation(bot.getTeam());
+        double laneFrac = 0.0;
+        if (formation != null) {
+            laneFrac = formation.slot(bot.getFormationSlot()).lane();
+        }
+        Vector lateral = pf.lateral().clone();
+        if (lateral.lengthSquared() > 1e-6) {
+            lateral.normalize();
+            cover.add(lateral.multiply(laneFrac * pf.halfWidth() * 0.35));
+        }
         return clampToField(game.getArena(), cover);
     }
 
     /**
-     * Formation slot for an off-ball player. Each role has a home depth and a lane
-     * across the pitch; the whole block slides up/down with the ball and shuffles
-     * toward the ball side, so the team keeps a believable shape.
+     * Formation slot for an off-ball player. Uses the bot's actual formation slot
+     * (depth + lane) so the back four spreads across the pitch instead of clustering.
      */
     private static Location formationAnchor(Game game, MatchBot bot, Location ballLoc, Location ownGoal,
                                             Location oppGoal, PitchFrame pf, boolean attacking) {
-        int slot = outfieldSlotIndex(bot, game, bot.getTeam());
-        int count = outfieldSlotCount(game, bot.getTeam());
+        BotFormation formation = game.getFormation(bot.getTeam());
+        BotFormation.FormationSlot fslot = formation != null
+                ? formation.slot(bot.getFormationSlot()) : null;
 
-        double progress = progressAlongPitch(ballLoc, ownGoal, oppGoal); // 0 own .. 1 opp
-        double ballDepth = progress * 2.0 - 1.0;                          // -1 .. 1
+        double progress = progressAlongPitch(ballLoc, ownGoal, oppGoal);
         Vector rel = ballLoc.toVector().subtract(pf.center().toVector());
         rel.setY(0);
         double ballSide = clamp(rel.dot(pf.lateral()) / pf.halfWidth(), -1.0, 1.0);
+        double ballDepth = progress * 2.0 - 1.0;
 
-        double roleDepth = roleBaseDepth(bot.getRole());
-        double phase = attacking ? 0.14 : -0.22;
-        double depthFrac = clamp(roleDepth + ballDepth * 0.45 + phase, -0.95, 0.92);
+        double homeDepth;
+        double homeLane;
+        if (fslot != null) {
+            homeDepth = fslot.depth() * 1.85 - 0.92;
+            homeLane = fslot.lane();
+        } else {
+            int slot = outfieldSlotIndex(bot, game, bot.getTeam());
+            int count = outfieldSlotCount(game, bot.getTeam());
+            homeDepth = roleBaseDepth(bot.getRole());
+            homeLane = count > 1 ? ((slot + 0.5) / count) * 2.0 - 1.0 : 0.0;
+            homeLane *= roleWidth(bot.getRole());
+        }
 
-        double laneBase = count > 1 ? ((slot + 0.5) / count) * 2.0 - 1.0 : 0.0;
-        laneBase *= roleWidth(bot.getRole());
-        double laneFrac = clamp(laneBase * 0.9 + ballSide * 0.3, -0.98, 0.98);
+        double shiftDepth = ballDepth * shapeShiftForRole(bot.getRole(), attacking);
+        double phase = attacking ? 0.10 : -0.06;
+        double minDepthFrac = minDepthFracForRole(bot.getRole());
+        double depthFrac = clamp(homeDepth + shiftDepth + phase, minDepthFrac, 0.92);
+
+        if (bot.getRole() == BotRole.DEFENDER && progress > 0.52) {
+            depthFrac += (progress - 0.52) * 0.55;
+        }
+        if (bot.getRole() == BotRole.MIDFIELDER && progress > 0.62) {
+            depthFrac += (progress - 0.62) * 0.35;
+        }
+        depthFrac = clamp(depthFrac, minDepthFrac, 0.92);
+
+        double laneFrac = clamp(homeLane * 0.88 + ballSide * 0.22, -0.98, 0.98);
 
         Location anchor = pf.center().clone()
-                .add(pf.forward().clone().multiply(depthFrac * pf.halfLength() * 0.9))
-                .add(pf.lateral().clone().multiply(laneFrac * pf.halfWidth() * 0.85));
+                .add(pf.forward().clone().multiply(depthFrac * pf.halfLength() * 0.92))
+                .add(pf.lateral().clone().multiply(laneFrac * pf.halfWidth() * 0.82));
         anchor.setY(ballLoc.getY());
         return clampToField(game.getArena(), anchor);
+    }
+
+    private static double shapeShiftForRole(BotRole role, boolean attacking) {
+        return switch (role) {
+            case DEFENDER -> attacking ? 0.24 : 0.18;
+            case MIDFIELDER, PLAYMAKER -> attacking ? 0.32 : 0.26;
+            case WINGER -> attacking ? 0.36 : 0.28;
+            case STRIKER -> attacking ? 0.38 : 0.30;
+            default -> attacking ? 0.28 : 0.22;
+        };
     }
 
     /** Home depth along the pitch: -1 = own goal, +1 = opponent goal. */
@@ -1355,9 +1614,51 @@ public final class BotAi {
             case WINGER -> 0.22;
             case PLAYMAKER -> -0.02;
             case MIDFIELDER -> -0.05;
-            case DEFENDER -> -0.55;
+            case DEFENDER -> -0.38;
             default -> 0.0;
         };
+    }
+
+    /** Deepest allowed shape position per role (negative = toward own goal). */
+    private static double minDepthFracForRole(BotRole role) {
+        return switch (role) {
+            case DEFENDER -> -0.62;
+            case MIDFIELDER, PLAYMAKER -> -0.48;
+            case WINGER -> -0.35;
+            case STRIKER -> -0.22;
+            default -> -0.95;
+        };
+    }
+
+    /** Minimum distance in front of the goal line for outfield players. */
+    private static double minDepthBlocksFromGoal(BotRole role) {
+        return switch (role) {
+            case DEFENDER -> 3.5;
+            case MIDFIELDER, PLAYMAKER -> 8.0;
+            case WINGER -> 10.0;
+            case STRIKER -> 12.0;
+            default -> 5.0;
+        };
+    }
+
+    private static Location clampAwayFromOwnGoal(Game game, MatchBot bot, Location anchor,
+                                               Location ownGoal, Location oppGoal) {
+        if (anchor == null || isGoalkeeper(bot)) {
+            return anchor;
+        }
+        double minDepth = minDepthBlocksFromGoal(bot.getRole());
+        double depth = depthFromGoalLine(game, bot.getTeam(), anchor, ownGoal, oppGoal);
+        if (depth >= minDepth) {
+            return anchor;
+        }
+        Vector fieldDir = flatDirection(ownGoal, oppGoal);
+        if (fieldDir.lengthSquared() < 1e-6) {
+            return anchor;
+        }
+        fieldDir.normalize();
+        Location adjusted = anchor.clone().add(fieldDir.multiply(minDepth - depth));
+        adjusted.setY(anchor.getY());
+        return adjusted;
     }
 
     /** How wide a role naturally sits (scales the lane spread). */
@@ -1403,7 +1704,21 @@ public final class BotAi {
             if (mate == bot || mate.getTeam() != bot.getTeam() || mate.getLocation() == null) {
                 continue;
             }
-            push.add(separationPush(anchor, mate.getLocation()));
+            Vector sep = separationPush(anchor, mate.getLocation());
+            if (isGoalkeeper(mate)) {
+                double distKeeper = horizontalDistance(anchor, mate.getLocation());
+                if (distKeeper < KEEPER_SEPARATION_RADIUS) {
+                    Vector away = anchor.toVector().subtract(mate.getLocation().toVector());
+                    away.setY(0);
+                    if (away.lengthSquared() < 1e-6) {
+                        away = new Vector(1, 0, 0);
+                    }
+                    away.normalize();
+                    sep.add(away.multiply((KEEPER_SEPARATION_RADIUS - distKeeper) * 1.1));
+                }
+                sep.multiply(2.5);
+            }
+            push.add(sep);
         }
         for (SoccerPlayer sp : game.getHumanParticipants()) {
             if (sp.getTeam() != bot.getTeam() || sp.isBot()) {
@@ -1421,6 +1736,30 @@ public final class BotAi {
         Location spread = anchor.clone().add(push);
         spread.setY(anchor.getY());
         return clampToField(game.getArena(), spread);
+    }
+
+    /** Steer off-ball runs away from the nearest opponent. */
+    private static Location spreadFromOpponents(Game game, MatchBot bot, Location anchor) {
+        if (anchor == null) {
+            return null;
+        }
+        Location nearest = nearestOpponentLocation(game, bot.getTeam(), anchor);
+        if (nearest == null) {
+            return anchor;
+        }
+        double dist = horizontalDistance(anchor, nearest);
+        if (dist >= 3.5) {
+            return anchor;
+        }
+        Vector away = anchor.toVector().subtract(nearest.toVector());
+        away.setY(0);
+        if (away.lengthSquared() < 1e-6) {
+            away = new Vector(1, 0, 0);
+        }
+        away.normalize();
+        Location shifted = anchor.clone().add(away.multiply((3.5 - dist) * 0.9 + 0.6));
+        shifted.setY(anchor.getY());
+        return clampToField(game.getArena(), shifted);
     }
 
     /** Push anchor away from a teammate so bots stay 2–4 blocks apart. */
@@ -1824,6 +2163,30 @@ public final class BotAi {
         return v;
     }
 
+    private static boolean segmentNearLocation(Location from, Location to, Location point,
+                                               double radius, double maxHeight) {
+        if (from == null || to == null || point == null) {
+            return false;
+        }
+        Vector a = from.toVector();
+        Vector b = to.toVector();
+        Vector p = point.toVector();
+        Vector ab = b.clone().subtract(a);
+        ab.setY(0);
+        double lenSq = ab.lengthSquared();
+        double dist;
+        if (lenSq < 1e-8) {
+            dist = Math.hypot(p.getX() - a.getX(), p.getZ() - a.getZ());
+        } else {
+            Vector ap = p.clone().subtract(a);
+            ap.setY(0);
+            double t = Math.max(0.0, Math.min(1.0, ap.dot(ab) / lenSq));
+            Vector closest = a.clone().add(ab.multiply(t));
+            dist = Math.hypot(p.getX() - closest.getX(), p.getZ() - closest.getZ());
+        }
+        return dist <= radius && Math.abs(p.getY() - to.getY()) <= maxHeight;
+    }
+
     private static double horizontalDistance(Location a, Location b) {
         if (a == null || b == null || a.getWorld() == null || b.getWorld() == null) {
             return Double.MAX_VALUE;
@@ -1839,7 +2202,7 @@ public final class BotAi {
     }
 
     private record PassOption(Location target, double score, double charge,
-                              boolean strongKick, double lift, boolean receiverHuman) {
+                              boolean strongKick, double lift, boolean receiverHuman, PassStyle style) {
     }
 
     /**

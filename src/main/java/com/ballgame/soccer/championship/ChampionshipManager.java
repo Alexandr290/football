@@ -17,6 +17,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -94,6 +95,11 @@ public final class ChampionshipManager {
     }
 
     public Championship create(String id, String displayName, ChampionshipType type, String arenaName) {
+        return create(id, displayName, type, arenaName, null);
+    }
+
+    public Championship create(String id, String displayName, ChampionshipType type, String arenaName,
+                               Player creator) {
         String key = id.toLowerCase(Locale.ROOT);
         if (championships.containsKey(key)) {
             return null;
@@ -106,9 +112,108 @@ public final class ChampionshipManager {
                 plugin.settings().champPointsWin,
                 plugin.settings().champPointsDraw,
                 plugin.settings().champPointsLoss);
+        if (creator != null) {
+            championship.setCreatorId(creator.getUniqueId());
+        }
         championships.put(key, championship);
         save();
         return championship;
+    }
+
+    public boolean canManageChampionship(Player player, Championship championship) {
+        if (player == null || championship == null) {
+            return false;
+        }
+        return player.hasPermission("soccer.admin") || championship.isCreator(player.getUniqueId());
+    }
+
+    /**
+     * Starts a full 11v11 bot match for a cup fixture, teleports everyone to the
+     * arena as spectators, and kicks off automatically.
+     */
+    public boolean startBotFixtureMatch(Player initiator, Championship championship, ChampFixture fixture) {
+        if (!canManageChampionship(initiator, championship) || fixture == null) {
+            return false;
+        }
+        if (fixture.getState() == FixtureState.COMPLETED) {
+            plugin.messages().send(initiator, "champ-fixture-finished");
+            return false;
+        }
+        if (fixture.getState() == FixtureState.LIVE) {
+            plugin.messages().send(initiator, "match-already-started");
+            return false;
+        }
+        if (!canJoinFixture(championship, fixture)) {
+            plugin.messages().send(initiator, "champ-wc-teams-not-ready");
+            return false;
+        }
+        if (!plugin.settings().botsEnabled) {
+            plugin.messages().send(initiator, "champ-bots-disabled");
+            return false;
+        }
+        String arenaName = resolveFixtureArenaName(championship, fixture);
+        Arena arena = plugin.arenas().get(arenaName);
+        if (arena == null || !arena.isPlayable()) {
+            plugin.messages().send(initiator, "arena-not-ready");
+            return false;
+        }
+        Game game = plugin.games().startChampionshipBotMatch(championship, fixture, arena);
+        if (game == null) {
+            plugin.messages().send(initiator, "champ-bot-match-failed");
+            return false;
+        }
+        plugin.games().teleportServerToStadium(arena, game);
+        plugin.messages().broadcast(plugin.messages().format("champ-bot-match-started",
+                "team_a", fixture.sideADisplay(championship),
+                "team_b", fixture.sideBDisplay(championship),
+                "arena", arena.getName()));
+        return true;
+    }
+
+    public boolean canChangeFixtureArena(Championship championship, ChampFixture fixture) {
+        if (championship == null || fixture == null) {
+            return false;
+        }
+        if (fixture.getState() == FixtureState.COMPLETED || fixture.getState() == FixtureState.LIVE) {
+            return false;
+        }
+        Game game = plugin.games().findGameByFixture(championship.getId(), fixture.getId());
+        if (game != null && !game.isEnded()) {
+            GameState state = game.getState();
+            return state == GameState.WAITING || state == GameState.COUNTDOWN;
+        }
+        return true;
+    }
+
+    public boolean setFixtureArena(Player player, Championship championship,
+                                   ChampFixture fixture, String arenaName) {
+        if (!canManageChampionship(player, championship) || fixture == null) {
+            return false;
+        }
+        if (!canChangeFixtureArena(championship, fixture)) {
+            plugin.messages().send(player, "champ-fixture-arena-locked");
+            return false;
+        }
+        if (arenaName == null || arenaName.isBlank()) {
+            return false;
+        }
+        Arena arena = plugin.arenas().get(arenaName);
+        if (arena == null) {
+            plugin.messages().send(player, "arena-not-found", "arena", arenaName);
+            return false;
+        }
+        if (!arena.isPlayable()) {
+            plugin.messages().send(player, "arena-not-ready");
+            return false;
+        }
+        fixture.setArenaName(arena.getName());
+        save();
+        plugin.games().resetFixtureLobbyGame(championship, fixture);
+        plugin.messages().send(player, "champ-fixture-arena-set",
+                "team_a", fixture.sideADisplay(championship),
+                "team_b", fixture.sideBDisplay(championship),
+                "arena", arena.getName());
+        return true;
     }
 
     public boolean delete(String id) {
@@ -218,11 +323,33 @@ public final class ChampionshipManager {
                 || championship.getState() == ChampionshipState.ACTIVE;
     }
 
+    /** World Cup R16 knockout where anyone may pick a side and enter the lobby. */
+    public boolean allowsOpenWorldCupJoin(Championship championship) {
+        return championship != null
+                && championship.getType() == ChampionshipType.KNOCKOUT
+                && plugin.settings().worldCupR16
+                && championship.getState() == ChampionshipState.ACTIVE;
+    }
+
+    public boolean isNationalFixture(Championship championship, ChampFixture fixture) {
+        if (championship == null || fixture == null) {
+            return false;
+        }
+        ChampTeam teamA = championship.getTeam(fixture.getTeamAId());
+        ChampTeam teamB = championship.getTeam(fixture.getTeamBId());
+        return (teamA != null && teamA.isNationalTeam()) || (teamB != null && teamB.isNationalTeam());
+    }
+
+    public boolean allowsOpenFixtureJoin(Championship championship, ChampFixture fixture) {
+        return allowsOpenWorldCupJoin(championship) && isNationalFixture(championship, fixture);
+    }
+
     public boolean canJoinFixture(Championship championship, ChampFixture fixture) {
         if (!areTeamsReadyForMatch(championship, fixture)) {
             return false;
         }
-        if (isWorldCupGroupFixture(championship, fixture)
+        if (!plugin.settings().worldCupR16
+                && isWorldCupGroupFixture(championship, fixture)
                 && !isWorldCupGroupCalendarComplete(championship)) {
             return false;
         }
@@ -241,7 +368,8 @@ public final class ChampionshipManager {
         if (fixture.getState() == FixtureState.COMPLETED) {
             return false;
         }
-        if (!fixture.involvesPlayer(championship, playerId)) {
+        if (!fixture.involvesPlayer(championship, playerId)
+                && !allowsOpenFixtureJoin(championship, fixture)) {
             return false;
         }
         if (!canJoinFixture(championship, fixture)) {
@@ -321,6 +449,11 @@ public final class ChampionshipManager {
         }
         if (championship.getType() == ChampionshipType.LEAGUE) {
             generateMissingLeagueFixtures(championship);
+        } else if (plugin.settings().worldCupR16) {
+            if (!canStartWorldCupR16(championship)) {
+                return false;
+            }
+            ensureWorldCupR16Bracket(championship);
         } else if (!canStartWorldCup(championship)) {
             return false;
         } else {
@@ -360,9 +493,13 @@ public final class ChampionshipManager {
             }
             return false;
         }
-        if (championship.getType() == ChampionshipType.KNOCKOUT && !canStartWorldCup(championship)) {
+        if (championship.getType() == ChampionshipType.KNOCKOUT && !canStartWorldCupAny(championship)) {
             if (player != null) {
-                if (championship.teamCount() != plugin.settings().worldCupTeamSlots()) {
+                if (plugin.settings().worldCupR16) {
+                    plugin.messages().send(player, "champ-start-wc-r16",
+                            "filled", String.valueOf(championship.filledBracketSlots()),
+                            "required", String.valueOf(plugin.settings().worldCupTeamSlots()));
+                } else if (championship.teamCount() != plugin.settings().worldCupTeamSlots()) {
                     plugin.messages().send(player, "champ-start-wc-teams",
                             "required", String.valueOf(plugin.settings().worldCupTeamSlots()));
                 } else {
@@ -385,10 +522,200 @@ public final class ChampionshipManager {
         return true;
     }
 
+    private boolean canStartWorldCupAny(Championship championship) {
+        if (plugin.settings().worldCupR16) {
+            return canStartWorldCupR16(championship);
+        }
+        return canStartWorldCup(championship);
+    }
+
+    private boolean canStartWorldCupR16(Championship championship) {
+        if (championship == null || championship.getType() != ChampionshipType.KNOCKOUT) {
+            return false;
+        }
+        int required = plugin.settings().worldCupTeamSlots();
+        if (championship.filledBracketSlots() < required) {
+            return false;
+        }
+        return championship.getArenaName() != null && !championship.getArenaName().isEmpty();
+    }
+
     private boolean canStartWorldCup(Championship championship) {
         return championship.getType() == ChampionshipType.KNOCKOUT
                 && championship.teamCount() == plugin.settings().worldCupTeamSlots()
                 && isWorldCupGroupCalendarComplete(championship);
+    }
+
+    /**
+     * Creates national ChampTeams from bracket slots and builds the R16→Final knockout tree.
+     */
+    public boolean ensureWorldCupR16Bracket(Championship championship) {
+        if (championship == null || championship.getType() != ChampionshipType.KNOCKOUT) {
+            return false;
+        }
+        int size = plugin.settings().worldCupTeamSlots();
+        List<String> codes = new ArrayList<>();
+        for (int i = 0; i < size; i++) {
+            String code = championship.getBracketNation(i);
+            if (code == null || code.isBlank()) {
+                return false;
+            }
+            codes.add(code.toUpperCase(Locale.ROOT));
+        }
+
+        championship.clearFixtures();
+        championship.getTeams().values().forEach(t -> t.setEliminated(false));
+        // Drop previous national teams not in the new bracket
+        List<String> removeIds = new ArrayList<>();
+        for (ChampTeam team : championship.getTeams().values()) {
+            if (team.isNationalTeam() && !codes.contains(team.getNationCode().toUpperCase(Locale.ROOT))) {
+                removeIds.add(team.getId());
+            }
+        }
+        for (String id : removeIds) {
+            championship.removeTeam(id);
+        }
+
+        List<String> seededTeamIds = new ArrayList<>();
+        for (String code : codes) {
+            ChampTeam team = findTeamByNation(championship, code);
+            if (team == null) {
+                team = createNationTeam(championship, code, null);
+            }
+            if (team == null) {
+                return false;
+            }
+            team.setEliminated(false);
+            seededTeamIds.add(team.getId());
+        }
+
+        generatePlayoffBracket(championship, seededTeamIds, size);
+        championship.setPlayoffsActive(true);
+        save();
+        return true;
+    }
+
+    public ChampTeam findTeamByNation(Championship championship, String nationCode) {
+        if (championship == null || nationCode == null) {
+            return null;
+        }
+        String key = nationCode.toUpperCase(Locale.ROOT);
+        for (ChampTeam team : championship.getTeams().values()) {
+            if (key.equalsIgnoreCase(team.getNationCode())) {
+                return team;
+            }
+        }
+        return null;
+    }
+
+    public ChampTeam createNationTeam(Championship championship, String nationCode, Player captain) {
+        if (championship == null || nationCode == null) {
+            return null;
+        }
+        var nation = plugin.fifaCatalog().get(nationCode);
+        if (nation == null) {
+            return null;
+        }
+        ChampTeam existing = findTeamByNation(championship, nation.getCode());
+        if (existing != null) {
+            if (captain != null && !existing.contains(captain.getUniqueId())) {
+                if (championship.findTeamOf(captain.getUniqueId()) == null
+                        && existing.size() < plugin.settings().maxPlayersPerTeam) {
+                    existing.addMember(captain.getUniqueId());
+                    if (existing.getCaptain() == null) {
+                        existing.setCaptain(captain.getUniqueId());
+                    }
+                    save();
+                }
+            }
+            return existing;
+        }
+        if (championship.teamCount() >= plugin.settings().champMaxTeams
+                && championship.getType() != ChampionshipType.KNOCKOUT) {
+            return null;
+        }
+        String teamId = "team-" + (++teamIdSeq);
+        String display = nation.localizedName(isRussianLocale());
+        ChampTeam team = new ChampTeam(teamId, display, captain != null ? captain.getUniqueId() : null);
+        team.setNationCode(nation.getCode());
+        championship.addTeam(team);
+        save();
+        return team;
+    }
+
+    private boolean isRussianLocale() {
+        String lang = plugin.messages() != null ? plugin.getConfig().getString("settings.language", "en") : "en";
+        return lang != null && lang.toLowerCase(Locale.ROOT).startsWith("ru");
+    }
+
+    public boolean setWorldCupBracketSlot(Championship championship, int slot, String nationCode) {
+        if (championship == null || championship.getType() != ChampionshipType.KNOCKOUT) {
+            return false;
+        }
+        if (!championship.isRegistrationOpen() && championship.getState() != ChampionshipState.FINISHED) {
+            return false;
+        }
+        int size = plugin.settings().worldCupTeamSlots();
+        if (slot < 0 || slot >= size) {
+            return false;
+        }
+        if (nationCode != null) {
+            String code = nationCode.toUpperCase(Locale.ROOT);
+            if (plugin.fifaCatalog().get(code) == null) {
+                return false;
+            }
+            for (int i = 0; i < size; i++) {
+                if (i != slot && code.equalsIgnoreCase(championship.getBracketNation(i))) {
+                    return false;
+                }
+            }
+            championship.setBracketNation(slot, code);
+        } else {
+            championship.setBracketNation(slot, null);
+        }
+        save();
+        return true;
+    }
+
+    public boolean shuffleWorldCupBracket(Championship championship) {
+        if (championship == null || !championship.isRegistrationOpen()) {
+            return false;
+        }
+        List<String> filled = new ArrayList<>();
+        for (String code : championship.getBracketNationCodes()) {
+            if (code != null && !code.isBlank()) {
+                filled.add(code);
+            }
+        }
+        if (filled.size() < 2) {
+            return false;
+        }
+        Collections.shuffle(filled);
+        championship.clearBracketNations();
+        for (int i = 0; i < filled.size(); i++) {
+            championship.setBracketNation(i, filled.get(i));
+        }
+        save();
+        return true;
+    }
+
+    /** After a finished World Cup, clear results so a new R16 bracket can be built. */
+    public boolean resetKnockoutBracket(Championship championship) {
+        if (championship == null || championship.getType() != ChampionshipType.KNOCKOUT) {
+            return false;
+        }
+        championship.clearFixtures();
+        championship.setPlayoffsActive(false);
+        championship.setChampionTeamId(null);
+        for (ChampTeam team : championship.getTeams().values()) {
+            team.setEliminated(false);
+        }
+        for (ChampStanding standing : championship.getStandings().values()) {
+            standing.load(0, 0, 0, 0, 0, 0, 0);
+        }
+        championship.setState(ChampionshipState.REGISTRATION);
+        save();
+        return true;
     }
 
     public int worldCupRequiredGroupMatches() {
@@ -499,7 +826,14 @@ public final class ChampionshipManager {
         }
         ChampTeam teamA = championship.getTeam(fixture.getTeamAId());
         ChampTeam teamB = championship.getTeam(fixture.getTeamBId());
-        return teamA != null && teamB != null && (teamA.size() >= 1 || teamB.size() >= 1);
+        if (teamA == null || teamB == null) {
+            return false;
+        }
+        // National-team fixtures can be filled with bots even before humans join.
+        if (teamA.isNationalTeam() && teamB.isNationalTeam()) {
+            return true;
+        }
+        return teamA.size() >= 1 || teamB.size() >= 1;
     }
 
     private void promoteScheduledToGroupFixtures(Championship championship) {
@@ -984,7 +1318,10 @@ public final class ChampionshipManager {
 
     private void generatePlayoffBracket(Championship championship, List<String> seededTeams, int bracketSize) {
         List<String> slots;
-        if (bracketSize == 8 && seededTeams.size() >= 8) {
+        if (bracketSize == 16 && seededTeams.size() >= 16) {
+            // Preserve bracket-builder slot order (1/16 pairings).
+            slots = new ArrayList<>(seededTeams.subList(0, 16));
+        } else if (bracketSize == 8 && seededTeams.size() >= 8) {
             slots = applyBracketSeeding(seededTeams.subList(0, 8));
         } else {
             slots = new ArrayList<>(seededTeams);
@@ -1018,6 +1355,17 @@ public final class ChampionshipManager {
             if (pair[1] < seededTeams.size()) {
                 ordered.add(seededTeams.get(pair[1]));
             }
+        }
+        return ordered;
+    }
+
+    /** Classic R16 seeding: 1v16, 8v9, 4v13, 5v12, 2v15, 7v10, 3v14, 6v11. */
+    private List<String> applyBracketSeeding16(List<String> seededTeams) {
+        int[][] pairs = {{0, 15}, {7, 8}, {3, 12}, {4, 11}, {1, 14}, {6, 9}, {2, 13}, {5, 10}};
+        List<String> ordered = new ArrayList<>();
+        for (int[] pair : pairs) {
+            ordered.add(seededTeams.get(pair[0]));
+            ordered.add(seededTeams.get(pair[1]));
         }
         return ordered;
     }
@@ -1105,6 +1453,12 @@ public final class ChampionshipManager {
     }
 
     public boolean joinFixtureMatch(Player player, Championship championship, ChampFixture fixture) {
+        TeamSide side = resolveFixtureSide(player, championship, fixture);
+        return joinFixtureMatch(player, championship, fixture, side);
+    }
+
+    public boolean joinFixtureMatch(Player player, Championship championship, ChampFixture fixture,
+                                    TeamSide side) {
         if (fixture.getState() == FixtureState.COMPLETED) {
             return false;
         }
@@ -1113,11 +1467,20 @@ public final class ChampionshipManager {
             return false;
         }
 
-        if (!fixture.involvesPlayer(championship, player.getUniqueId())) {
-            plugin.messages().send(player, "champ-fixture-wrong-team",
-                    "team_a", fixture.sideADisplay(championship),
-                    "team_b", fixture.sideBDisplay(championship));
-            return false;
+        boolean onFixtureTeam = fixture.involvesPlayer(championship, player.getUniqueId());
+        if (!onFixtureTeam) {
+            if (!allowsOpenFixtureJoin(championship, fixture) || side == null) {
+                plugin.messages().send(player, "champ-fixture-wrong-team",
+                        "team_a", fixture.sideADisplay(championship),
+                        "team_b", fixture.sideBDisplay(championship));
+                return false;
+            }
+            if (!ensurePlayerOnFixtureSide(player, championship, fixture, side)) {
+                plugin.messages().send(player, "champ-join-team-failed");
+                return false;
+            }
+        } else if (side == null) {
+            side = resolveFixtureSide(player, championship, fixture);
         }
 
         if (!canPlayerJoinFixture(championship, fixture, player.getUniqueId())) {
@@ -1138,7 +1501,6 @@ public final class ChampionshipManager {
             return false;
         }
 
-        TeamSide side = resolveFixtureSide(player, championship, fixture);
         if (side == null || !fixture.hasBothSides()) {
             plugin.messages().send(player, "champ-fixture-wrong-team",
                     "team_a", fixture.sideADisplay(championship),
@@ -1154,6 +1516,26 @@ public final class ChampionshipManager {
         return plugin.games().joinChampionship(
                 player, arena, side, championship.getId(), fixture.getId(),
                 fixture.sideADisplay(championship), fixture.sideBDisplay(championship));
+    }
+
+    /** Adds the player to the championship team mapped to {@code side} for this fixture. */
+    public boolean ensurePlayerOnFixtureSide(Player player, Championship championship,
+                                             ChampFixture fixture, TeamSide side) {
+        if (player == null || championship == null || fixture == null || side == null) {
+            return false;
+        }
+        String teamId = side == TeamSide.RED ? fixture.getTeamAId() : fixture.getTeamBId();
+        if (teamId == null) {
+            return false;
+        }
+        ChampTeam team = championship.getTeam(teamId);
+        if (team == null || team.isEliminated()) {
+            return false;
+        }
+        if (team.contains(player.getUniqueId())) {
+            return true;
+        }
+        return joinTeam(championship, player, teamId);
     }
 
     public String resolveFixtureArenaName(Championship championship, ChampFixture fixture) {
@@ -1191,7 +1573,14 @@ public final class ChampionshipManager {
         if (championship == null || fixture == null) {
             return false;
         }
-        return side == resolveFixtureSide(player, championship, fixture);
+        TeamSide resolved = resolveFixtureSide(player, championship, fixture);
+        if (side == resolved) {
+            return true;
+        }
+        if (allowsOpenFixtureJoin(championship, fixture)) {
+            return ensurePlayerOnFixtureSide(player, championship, fixture, side);
+        }
+        return false;
     }
 
     public void openMainMenu(Player player) {
@@ -1228,6 +1617,14 @@ public final class ChampionshipManager {
         championship.setState(ChampionshipState.valueOf(
                 section.getString("state", "REGISTRATION").toUpperCase(Locale.ROOT)));
         championship.setCreatedAt(section.getLong("created-at", System.currentTimeMillis()));
+        String creatorStr = section.getString("creator");
+        if (creatorStr != null && !creatorStr.isBlank()) {
+            try {
+                championship.setCreatorId(UUID.fromString(creatorStr));
+            } catch (IllegalArgumentException ignored) {
+                // ignore invalid legacy data
+            }
+        }
         championship.setChampionTeamId(section.getString("champion-team"));
         championship.setPlayoffsActive(section.getBoolean("playoffs-active", false));
 
@@ -1244,6 +1641,7 @@ public final class ChampionshipManager {
                 ChampTeam team = new ChampTeam(teamId, t.getString("name", teamId), captain);
                 team.setEliminated(t.getBoolean("eliminated", false));
                 team.setGroupId(t.getString("group"));
+                team.setNationCode(t.getString("nation-code"));
                 for (String member : t.getStringList("members")) {
                     UUID uuid = UUID.fromString(member);
                     if (!team.contains(uuid)) {
@@ -1252,6 +1650,11 @@ public final class ChampionshipManager {
                 }
                 championship.addTeam(team);
             }
+        }
+
+        List<String> bracket = section.getStringList("bracket-nations");
+        if (!bracket.isEmpty()) {
+            championship.setBracketNationCodes(bracket);
         }
 
         ConfigurationSection standingsSec = section.getConfigurationSection("standings");
@@ -1314,6 +1717,9 @@ public final class ChampionshipManager {
         section.set("points-draw", championship.getPointsDraw());
         section.set("points-loss", championship.getPointsLoss());
         section.set("created-at", championship.getCreatedAt());
+        if (championship.getCreatorId() != null) {
+            section.set("creator", championship.getCreatorId().toString());
+        }
         section.set("champion-team", championship.getChampionTeamId());
         section.set("playoffs-active", championship.isPlayoffsActive());
 
@@ -1328,12 +1734,17 @@ public final class ChampionshipManager {
             if (team.getGroupId() != null) {
                 t.set("group", team.getGroupId());
             }
+            if (team.getNationCode() != null) {
+                t.set("nation-code", team.getNationCode());
+            }
             List<String> members = new ArrayList<>();
             for (UUID uuid : team.getMembers()) {
                 members.add(uuid.toString());
             }
             t.set("members", members);
         }
+
+        section.set("bracket-nations", new ArrayList<>(championship.getBracketNationCodes()));
 
         ConfigurationSection standingsSec = section.createSection("standings");
         for (ChampStanding standing : championship.getStandings().values()) {

@@ -2,7 +2,9 @@ package com.ballgame.soccer.network;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
+import com.ballgame.soccer.bot.BotFormation;
 import com.ballgame.soccer.config.SoccerSettings;
+import com.ballgame.soccer.game.BotDifficulty;
 import com.ballgame.soccer.game.Game;
 import com.ballgame.soccer.game.QuickJoinMode;
 import com.ballgame.soccer.game.TeamSide;
@@ -208,7 +210,10 @@ public final class NetworkManager {
         }
 
         boolean joined = request.mode() == QuickJoinMode.SOLO
-                ? plugin.games().joinSolo(player, target.arena(), request.team(), request.botCount(), request.teammateCount())
+                ? plugin.games().joinSolo(player, target.arena(), request.team(),
+                request.botCount(), request.teammateCount(),
+                BotDifficulty.MEDIUM, BotDifficulty.MEDIUM,
+                BotFormation.FOUR_FOUR_TWO, BotFormation.FOUR_FOUR_TWO)
                 : plugin.games().join(player, target.arena(), request.team());
         if (!joined && request.team() != null) {
             plugin.messages().send(player, "quickjoin-team-full",

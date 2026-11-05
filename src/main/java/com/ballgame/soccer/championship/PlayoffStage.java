@@ -49,7 +49,8 @@ public enum PlayoffStage {
         return switch (roundsFromEnd) {
             case 1 -> SEMI_FINAL;
             case 2 -> QUARTER_FINAL;
-            default -> QUARTER_FINAL;
+            case 3 -> ROUND_OF_16;
+            default -> ROUND_OF_32;
         };
     }
 

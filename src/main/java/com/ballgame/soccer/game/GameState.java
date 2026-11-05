@@ -22,8 +22,12 @@ public enum GameState {
     EXTRA_TIME("Extra Time"),
     /** Penalty shootout. */
     PENALTIES("Penalties"),
+    /** Human referee stopped play. */
+    REFEREE_STOP("Referee Stop"),
     /** TV-style goal replay playback. */
     REPLAY("Replay"),
+    /** VAR review playback. */
+    VAR_REVIEW("VAR Review"),
     /** Match finished, showing results. */
     ENDED("Finished");
 
@@ -44,7 +48,8 @@ public enum GameState {
     /** Stadium crowd audio runs through these phases (kickoff → full time). */
     public boolean hasStadiumCrowd() {
         return switch (this) {
-            case KICKOFF, PLAYING, THROW_IN, OFFSIDE, HALFTIME, EXTRA_TIME, PENALTIES, REPLAY -> true;
+            case KICKOFF, PLAYING, THROW_IN, OFFSIDE, HALFTIME, EXTRA_TIME, PENALTIES,
+                    REPLAY, VAR_REVIEW, REFEREE_STOP -> true;
             default -> false;
         };
     }

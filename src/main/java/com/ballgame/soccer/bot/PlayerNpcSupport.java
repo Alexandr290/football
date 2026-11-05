@@ -74,6 +74,10 @@ final class PlayerNpcSupport {
     private static Constructor<?> addEntityCtor;
     private static Constructor<?> removeEntitiesCtor;
     private static Constructor<?> teleportEntityCtor;
+    private static Constructor<?> movePosRotCtor;
+    private static Constructor<?> positionMoveRotationCtor;
+    private static Constructor<?> vec3Ctor;
+    private static Object vec3Zero;
     private static Constructor<?> rotateHeadCtor;
     private static Constructor<?> setEntityDataCtor;
     private static Constructor<?> animateCtor;
@@ -188,7 +192,11 @@ final class PlayerNpcSupport {
 
             Class<?> teleportPacket =
                     Class.forName("net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket");
+            resolveModernTeleport();
             teleportEntityCtor = findTeleportCtor(teleportPacket, nmsEntityClass);
+
+            movePosRotCtor = findMovePosRotCtor(
+                    Class.forName("net.minecraft.network.protocol.game.ClientboundMoveEntityPacket"));
 
             Class<?> rotateHead =
                     Class.forName("net.minecraft.network.protocol.game.ClientboundRotateHeadPacket");
@@ -319,6 +327,10 @@ final class PlayerNpcSupport {
         private final int entityId;
         private final Set<UUID> viewers = new HashSet<>();
         private Location location;
+        private double lastSentX;
+        private double lastSentY;
+        private double lastSentZ;
+        private boolean hasSentPosition;
         private boolean sprinting;
         private boolean dataDirty = true;
         private String lastError = "";
@@ -369,6 +381,10 @@ final class PlayerNpcSupport {
 
         private void place(Location loc) {
             this.location = loc.clone();
+            lastSentX = loc.getX();
+            lastSentY = loc.getY();
+            lastSentZ = loc.getZ();
+            hasSentPosition = false;
             try {
                 if (entityAbsMoveTo != null) {
                     entityAbsMoveTo.invoke(serverPlayer,
@@ -638,9 +654,24 @@ final class PlayerNpcSupport {
 
         private void sendMove(Player viewer, float yaw) {
             try {
-                if (teleportEntityCtor != null) {
-                    Object tp = teleportEntityCtor.newInstance(buildTeleportArgs());
-                    send(viewer, tp);
+                if (location == null) {
+                    return;
+                }
+                boolean moved = false;
+                try {
+                    moved = sendPositionPacket(viewer, yaw);
+                } catch (ReflectiveOperationException primary) {
+                    LOG.fine("[AdvancedSoccer] NPC teleport packet failed: " + primary.getMessage());
+                }
+                if (!moved && movePosRotCtor != null && hasSentPosition) {
+                    sendRelativeMove(viewer, yaw);
+                    moved = true;
+                }
+                if (moved) {
+                    lastSentX = location.getX();
+                    lastSentY = location.getY();
+                    lastSentZ = location.getZ();
+                    hasSentPosition = true;
                 }
                 sendHeadRotation(viewer, yaw);
                 if (dataDirty) {
@@ -652,13 +683,68 @@ final class PlayerNpcSupport {
             }
         }
 
-        private Object[] buildTeleportArgs() throws ReflectiveOperationException {
-            Class<?>[] params = teleportEntityCtor.getParameterTypes();
-            if (params.length == 1 && params[0].isInstance(serverPlayer)) {
-                return new Object[]{serverPlayer};
+        private boolean sendPositionPacket(Player viewer, float yaw) throws ReflectiveOperationException {
+            if (teleportEntityCtor == null || location == null) {
+                return false;
             }
-            if (params.length == 1 && params[0] == int.class) {
-                return new Object[]{entityId};
+            Object[] args = buildTeleportArgs(yaw);
+            if (args == null) {
+                return false;
+            }
+            Object tp = teleportEntityCtor.newInstance(args);
+            send(viewer, tp);
+            return true;
+        }
+
+        private void sendRelativeMove(Player viewer, float yaw) throws ReflectiveOperationException {
+            double dx = location.getX() - lastSentX;
+            double dy = location.getY() - lastSentY;
+            double dz = location.getZ() - lastSentZ;
+            if (Math.abs(dx) > 8.0 || Math.abs(dy) > 8.0 || Math.abs(dz) > 8.0) {
+                return;
+            }
+            short sdx = (short) Math.round(dx * 4096.0);
+            short sdy = (short) Math.round(dy * 4096.0);
+            short sdz = (short) Math.round(dz * 4096.0);
+            byte yRot = (byte) (yaw * 256.0f / 360.0f);
+            Object packet = movePosRotCtor.newInstance(entityId, sdx, sdy, sdz, yRot, (byte) 0, true);
+            send(viewer, packet);
+        }
+
+        private Object[] buildTeleportArgs(float yaw) throws ReflectiveOperationException {
+            Class<?>[] params = teleportEntityCtor.getParameterTypes();
+            if (params.length == 1) {
+                if (params[0].isInstance(serverPlayer) || nmsEntityClass.isAssignableFrom(params[0])) {
+                    return new Object[]{serverPlayer};
+                }
+                if (params[0] == int.class) {
+                    return new Object[]{entityId};
+                }
+            }
+            // Paper 1.21.2+: (int id, PositionMoveRotation, Set<Relative>, boolean onGround)
+            if (params.length == 4 && params[0] == int.class && positionMoveRotationCtor != null
+                    && params[1].isAssignableFrom(positionMoveRotationCtor.getDeclaringClass())) {
+                Object position = vec3Ctor.newInstance(location.getX(), location.getY(), location.getZ());
+                Object delta = vec3Zero != null ? vec3Zero : vec3Ctor.newInstance(0.0, 0.0, 0.0);
+                Object change = positionMoveRotationCtor.newInstance(position, delta, yaw, 0f);
+                return new Object[]{entityId, change, Collections.emptySet(), true};
+            }
+            if (params.length >= 4 && params[0] == int.class && params[1] == double.class) {
+                Object[] args = new Object[params.length];
+                args[0] = entityId;
+                args[1] = location.getX();
+                args[2] = location.getY();
+                args[3] = location.getZ();
+                if (params.length >= 5 && params[4] == byte.class) {
+                    args[4] = (byte) (yaw * 256.0f / 360.0f);
+                }
+                if (params.length >= 6 && params[5] == byte.class) {
+                    args[5] = (byte) 0;
+                }
+                if (params.length >= 7 && params[6] == boolean.class) {
+                    args[6] = true;
+                }
+                return args;
             }
             return new Object[]{serverPlayer};
         }
@@ -916,18 +1002,69 @@ final class PlayerNpcSupport {
         }
     }
 
-    private static Constructor<?> findTeleportCtor(Class<?> teleportPacket, Class<?> entityClass) {
+    private static void resolveModernTeleport() {
         try {
-            return teleportPacket.getConstructor(entityClass);
-        } catch (NoSuchMethodException ex) {
-            for (Constructor<?> c : teleportPacket.getConstructors()) {
+            Class<?> vec3 = Class.forName("net.minecraft.world.phys.Vec3");
+            vec3Ctor = vec3.getConstructor(double.class, double.class, double.class);
+            try {
+                vec3Zero = vec3.getField("ZERO").get(null);
+            } catch (NoSuchFieldException ignored) {
+                vec3Zero = null;
+            }
+            Class<?> change = Class.forName("net.minecraft.world.entity.PositionMoveRotation");
+            positionMoveRotationCtor = change.getConstructor(vec3, vec3, float.class, float.class);
+        } catch (ReflectiveOperationException ex) {
+            positionMoveRotationCtor = null;
+            LOG.fine("[AdvancedSoccer] Modern teleport packet unavailable: " + ex.getMessage());
+        }
+    }
+
+    private static Constructor<?> findTeleportCtor(Class<?> teleportPacket, Class<?> entityClass) {
+        Constructor<?> modernCtor = null;
+        Constructor<?> coordCtor = null;
+        Constructor<?> entityCtor = null;
+        for (Constructor<?> c : teleportPacket.getConstructors()) {
+            Class<?>[] p = c.getParameterTypes();
+            if (p.length == 4 && p[0] == int.class && positionMoveRotationCtor != null
+                    && p[1].isAssignableFrom(positionMoveRotationCtor.getDeclaringClass())
+                    && Set.class.isAssignableFrom(p[2]) && p[3] == boolean.class) {
+                modernCtor = c;
+            } else if (p.length >= 4 && p[0] == int.class && p[1] == double.class) {
+                coordCtor = c;
+            } else if (p.length == 1 && entityClass.isAssignableFrom(p[0])) {
+                entityCtor = c;
+            }
+        }
+        if (modernCtor != null) {
+            return modernCtor;
+        }
+        if (coordCtor != null) {
+            return coordCtor;
+        }
+        if (entityCtor != null) {
+            return entityCtor;
+        }
+        for (Constructor<?> c : teleportPacket.getConstructors()) {
+            if (c.getParameterCount() == 1) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    private static Constructor<?> findMovePosRotCtor(Class<?> movePacket) {
+        for (Class<?> inner : movePacket.getDeclaredClasses()) {
+            if (!"PosRot".equals(inner.getSimpleName())) {
+                continue;
+            }
+            for (Constructor<?> c : inner.getConstructors()) {
                 Class<?>[] p = c.getParameterTypes();
-                if (p.length == 1) {
+                if (p.length == 7 && p[0] == int.class && p[1] == short.class) {
                     return c;
                 }
             }
-            return null;
         }
+        return null;
     }
 
     private static Method resolveConnectionSend(Class<?> connectionClass, Class<?> packetClass) {

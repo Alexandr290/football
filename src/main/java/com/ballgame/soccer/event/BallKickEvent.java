@@ -15,7 +15,7 @@ import org.bukkit.util.Vector;
 public final class BallKickEvent extends Event implements Cancellable {
 
     public enum KickType {
-        TOUCH, PASS, SHOT, TACKLE, HEADER, THROW_IN
+        TOUCH, PASS, LOFT_PASS, CROSS_PASS, SHOT, TACKLE, HEADER, THROW_IN
     }
 
     private static final HandlerList HANDLERS = new HandlerList();

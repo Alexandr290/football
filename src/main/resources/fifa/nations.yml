@@ -1,0 +1,1098 @@
+# FIFA World Cup 2026 national teams catalog
+# Static snapshot for AdvancedSoccer
+nations:
+  ARG:
+    name: "Argentina"
+    name-ru: "Аргентина"
+    confederation: CONMEBOL
+    fifa-rank: 1
+    group: J
+    primary-color: "&b"
+    secondary-color: "&f"
+    squad:
+      - {name: "Martinez", number: 23, pos: GK, starter: true}
+      - {name: "Molina", number: 2, pos: DF, starter: true}
+      - {name: "Romero", number: 13, pos: DF, starter: true}
+      - {name: "Otamendi", number: 19, pos: DF, starter: true}
+      - {name: "Tagliafico", number: 3, pos: DF, starter: true}
+      - {name: "De Paul", number: 7, pos: MF, starter: true}
+      - {name: "Mac Allister", number: 20, pos: MF, starter: true}
+      - {name: "Enzo Fernandez", number: 24, pos: MF, starter: true}
+      - {name: "Messi", number: 10, pos: FW, starter: true}
+      - {name: "Alvarez", number: 9, pos: FW, starter: true}
+      - {name: "Di Maria", number: 11, pos: FW, starter: true}
+      - {name: "Rulli", number: 12, pos: GK, starter: false}
+      - {name: "Paredes", number: 5, pos: MF, starter: false}
+      - {name: "Lautaro", number: 22, pos: FW, starter: false}
+      - {name: "Gonzalez", number: 15, pos: FW, starter: false}
+  FRA:
+    name: "France"
+    name-ru: "Франция"
+    confederation: UEFA
+    fifa-rank: 2
+    group: I
+    primary-color: "&9"
+    secondary-color: "&f"
+    squad:
+      - {name: "Maignan", number: 1, pos: GK, starter: true}
+      - {name: "Kounde", number: 5, pos: DF, starter: true}
+      - {name: "Saliba", number: 4, pos: DF, starter: true}
+      - {name: "Upamecano", number: 2, pos: DF, starter: true}
+      - {name: "Hernandez", number: 22, pos: DF, starter: true}
+      - {name: "Tchouameni", number: 6, pos: MF, starter: true}
+      - {name: "Camavinga", number: 8, pos: MF, starter: true}
+      - {name: "Rabiot", number: 14, pos: MF, starter: true}
+      - {name: "Mbappe", number: 10, pos: FW, starter: true}
+      - {name: "Dembele", number: 11, pos: FW, starter: true}
+      - {name: "Griezmann", number: 7, pos: FW, starter: true}
+      - {name: "Samba", number: 16, pos: GK, starter: false}
+      - {name: "Zaire-Emery", number: 12, pos: MF, starter: false}
+      - {name: "Thuram", number: 9, pos: FW, starter: false}
+  ESP:
+    name: "Spain"
+    name-ru: "Испания"
+    confederation: UEFA
+    fifa-rank: 3
+    group: H
+    primary-color: "&c"
+    secondary-color: "&e"
+    squad:
+      - {name: "Unai Simon", number: 1, pos: GK, starter: true}
+      - {name: "Carvajal", number: 2, pos: DF, starter: true}
+      - {name: "Le Normand", number: 3, pos: DF, starter: true}
+      - {name: "Cubarsi", number: 4, pos: DF, starter: true}
+      - {name: "Balde", number: 5, pos: DF, starter: true}
+      - {name: "Rodri", number: 16, pos: MF, starter: true}
+      - {name: "Pedri", number: 8, pos: MF, starter: true}
+      - {name: "Gavi", number: 9, pos: MF, starter: true}
+      - {name: "Yamal", number: 19, pos: FW, starter: true}
+      - {name: "Morata", number: 7, pos: FW, starter: true}
+      - {name: "Williams", number: 11, pos: FW, starter: true}
+      - {name: "Raya", number: 13, pos: GK, starter: false}
+      - {name: "Olmo", number: 10, pos: MF, starter: false}
+      - {name: "Oyarzabal", number: 15, pos: FW, starter: false}
+      - {name: "Ruiz", number: 14, pos: MF, starter: false}
+  ENG:
+    name: "England"
+    name-ru: "Англия"
+    confederation: UEFA
+    fifa-rank: 4
+    group: L
+    primary-color: "&f"
+    secondary-color: "&c"
+    squad:
+      - {name: "Pickford", number: 1, pos: GK, starter: true}
+      - {name: "Walker", number: 2, pos: DF, starter: true}
+      - {name: "Stones", number: 5, pos: DF, starter: true}
+      - {name: "Guehi", number: 6, pos: DF, starter: true}
+      - {name: "Lewis", number: 3, pos: DF, starter: true}
+      - {name: "Rice", number: 4, pos: MF, starter: true}
+      - {name: "Bellingham", number: 10, pos: MF, starter: true}
+      - {name: "Foden", number: 8, pos: MF, starter: true}
+      - {name: "Saka", number: 7, pos: FW, starter: true}
+      - {name: "Kane", number: 9, pos: FW, starter: true}
+      - {name: "Palmer", number: 11, pos: FW, starter: true}
+      - {name: "Ramsdale", number: 13, pos: GK, starter: false}
+      - {name: "Mainoo", number: 14, pos: MF, starter: false}
+      - {name: "Watkins", number: 15, pos: FW, starter: false}
+      - {name: "Gordon", number: 16, pos: FW, starter: false}
+  BRA:
+    name: "Brazil"
+    name-ru: "Бразилия"
+    confederation: CONMEBOL
+    fifa-rank: 5
+    group: C
+    primary-color: "&a"
+    secondary-color: "&e"
+    squad:
+      - {name: "Alisson", number: 1, pos: GK, starter: true}
+      - {name: "Danilo", number: 2, pos: DF, starter: true}
+      - {name: "Marquinhos", number: 4, pos: DF, starter: true}
+      - {name: "Gabriel Magalhaes", number: 3, pos: DF, starter: true}
+      - {name: "Carlos Augusto", number: 6, pos: DF, starter: true}
+      - {name: "Casemiro", number: 5, pos: MF, starter: true}
+      - {name: "Bruno Guimaraes", number: 8, pos: MF, starter: true}
+      - {name: "Rodrygo", number: 10, pos: MF, starter: true}
+      - {name: "Vinicius Jr", number: 7, pos: FW, starter: true}
+      - {name: "Richarlison", number: 9, pos: FW, starter: true}
+      - {name: "Raphinha", number: 11, pos: FW, starter: true}
+      - {name: "Ederson", number: 23, pos: GK, starter: false}
+      - {name: "Endrick", number: 16, pos: FW, starter: false}
+      - {name: "Andreas Pereira", number: 17, pos: MF, starter: false}
+      - {name: "Bremer", number: 14, pos: DF, starter: false}
+  POR:
+    name: "Portugal"
+    name-ru: "Португалия"
+    confederation: UEFA
+    fifa-rank: 6
+    group: K
+    primary-color: "&c"
+    secondary-color: "&a"
+    squad:
+      - {name: "Costa", number: 22, pos: GK, starter: true}
+      - {name: "Cancelo", number: 2, pos: DF, starter: true}
+      - {name: "Dias", number: 4, pos: DF, starter: true}
+      - {name: "Inacio", number: 5, pos: DF, starter: true}
+      - {name: "Mendes", number: 3, pos: DF, starter: true}
+      - {name: "Vitinha", number: 6, pos: MF, starter: true}
+      - {name: "Bernardo", number: 8, pos: MF, starter: true}
+      - {name: "Bruno", number: 10, pos: MF, starter: true}
+      - {name: "Ronaldo", number: 7, pos: FW, starter: true}
+      - {name: "Felix", number: 11, pos: FW, starter: true}
+      - {name: "Leao", number: 17, pos: FW, starter: true}
+      - {name: "Sa", number: 12, pos: GK, starter: false}
+      - {name: "Palhinha", number: 14, pos: MF, starter: false}
+      - {name: "Neto", number: 15, pos: FW, starter: false}
+      - {name: "Ramos", number: 9, pos: FW, starter: false}
+  NED:
+    name: "Netherlands"
+    name-ru: "Нидерланды"
+    confederation: UEFA
+    fifa-rank: 7
+    group: F
+    primary-color: "&6"
+    secondary-color: "&f"
+    squad:
+      - {name: "Verbruggen", number: 1, pos: GK, starter: true}
+      - {name: "Dumfries", number: 22, pos: DF, starter: true}
+      - {name: "Van Dijk", number: 4, pos: DF, starter: true}
+      - {name: "De Ligt", number: 3, pos: DF, starter: true}
+      - {name: "Ake", number: 5, pos: DF, starter: true}
+      - {name: "Reijnders", number: 6, pos: MF, starter: true}
+      - {name: "Gravenberch", number: 8, pos: MF, starter: true}
+      - {name: "Gakpo", number: 11, pos: MF, starter: true}
+      - {name: "Depay", number: 10, pos: FW, starter: true}
+      - {name: "Simons", number: 7, pos: FW, starter: true}
+      - {name: "Brobbey", number: 9, pos: FW, starter: true}
+      - {name: "Flekken", number: 13, pos: GK, starter: false}
+      - {name: "Schouten", number: 14, pos: MF, starter: false}
+      - {name: "Malen", number: 18, pos: FW, starter: false}
+  BEL:
+    name: "Belgium"
+    name-ru: "Бельгия"
+    confederation: UEFA
+    fifa-rank: 8
+    group: G
+    primary-color: "&c"
+    secondary-color: "&e"
+    squad:
+      - {name: "Casteels", number: 1, pos: GK, starter: true}
+      - {name: "Castagne", number: 2, pos: DF, starter: true}
+      - {name: "Debast", number: 4, pos: DF, starter: true}
+      - {name: "Theate", number: 5, pos: DF, starter: true}
+      - {name: "Faes", number: 3, pos: DF, starter: true}
+      - {name: "Onana", number: 6, pos: MF, starter: true}
+      - {name: "De Ketelaere", number: 8, pos: MF, starter: true}
+      - {name: "De Bruyne", number: 7, pos: MF, starter: true}
+      - {name: "Lukaku", number: 9, pos: FW, starter: true}
+      - {name: "Doku", number: 11, pos: FW, starter: true}
+      - {name: "Trossard", number: 10, pos: FW, starter: true}
+      - {name: "Sels", number: 12, pos: GK, starter: false}
+      - {name: "Tielemans", number: 14, pos: MF, starter: false}
+      - {name: "Openda", number: 15, pos: FW, starter: false}
+  CRO:
+    name: "Croatia"
+    name-ru: "Хорватия"
+    confederation: UEFA
+    fifa-rank: 10
+    group: L
+    primary-color: "&c"
+    secondary-color: "&9"
+    squad:
+      - {name: "Livakovic", number: 1, pos: GK, starter: true}
+      - {name: "Stanisic", number: 2, pos: DF, starter: true}
+      - {name: "Gvardiol", number: 4, pos: DF, starter: true}
+      - {name: "Sutalo", number: 5, pos: DF, starter: true}
+      - {name: "Sosa", number: 3, pos: DF, starter: true}
+      - {name: "Modric", number: 10, pos: MF, starter: true}
+      - {name: "Kovacic", number: 8, pos: MF, starter: true}
+      - {name: "Brozovic", number: 11, pos: MF, starter: true}
+      - {name: "Perisic", number: 14, pos: FW, starter: true}
+      - {name: "Kramaric", number: 9, pos: FW, starter: true}
+      - {name: "Petkovic", number: 16, pos: FW, starter: true}
+      - {name: "Ivusic", number: 12, pos: GK, starter: false}
+      - {name: "Majer", number: 7, pos: MF, starter: false}
+      - {name: "Budimir", number: 15, pos: FW, starter: false}
+  URU:
+    name: "Uruguay"
+    name-ru: "Уругвай"
+    confederation: CONMEBOL
+    fifa-rank: 11
+    group: H
+    primary-color: "&9"
+    secondary-color: "&0"
+    squad:
+      - {name: "Rochet", number: 1, pos: GK, starter: true}
+      - {name: "Varela", number: 2, pos: DF, starter: true}
+      - {name: "Araujo", number: 4, pos: DF, starter: true}
+      - {name: "Gimenez", number: 5, pos: DF, starter: true}
+      - {name: "Olivera", number: 3, pos: DF, starter: true}
+      - {name: "Valverde", number: 6, pos: MF, starter: true}
+      - {name: "Bentancur", number: 8, pos: MF, starter: true}
+      - {name: "De la Cruz", number: 7, pos: MF, starter: true}
+      - {name: "Nunez", number: 11, pos: FW, starter: true}
+      - {name: "Cavani", number: 9, pos: FW, starter: true}
+      - {name: "Pellistri", number: 10, pos: FW, starter: true}
+      - {name: "Muslera", number: 12, pos: GK, starter: false}
+      - {name: "Ugarte", number: 14, pos: MF, starter: false}
+      - {name: "Darwin", number: 15, pos: FW, starter: false}
+  GER:
+    name: "Germany"
+    name-ru: "Германия"
+    confederation: UEFA
+    fifa-rank: 12
+    group: E
+    primary-color: "&f"
+    secondary-color: "&0"
+    squad:
+      - {name: "Neuer", number: 1, pos: GK, starter: true}
+      - {name: "Kimmich", number: 6, pos: DF, starter: true}
+      - {name: "Rudiger", number: 2, pos: DF, starter: true}
+      - {name: "Tah", number: 4, pos: DF, starter: true}
+      - {name: "Mittelstadt", number: 3, pos: DF, starter: true}
+      - {name: "Andrich", number: 8, pos: MF, starter: true}
+      - {name: "Goretzka", number: 18, pos: MF, starter: true}
+      - {name: "Musiala", number: 10, pos: MF, starter: true}
+      - {name: "Sane", number: 19, pos: FW, starter: true}
+      - {name: "Havertz", number: 7, pos: FW, starter: true}
+      - {name: "Wirtz", number: 17, pos: FW, starter: true}
+      - {name: "ter Stegen", number: 22, pos: GK, starter: false}
+      - {name: "Gundogan", number: 21, pos: MF, starter: false}
+      - {name: "Fullkrug", number: 9, pos: FW, starter: false}
+      - {name: "Schlotterbeck", number: 11, pos: FW, starter: false}
+  COL:
+    name: "Colombia"
+    name-ru: "Колумбия"
+    confederation: CONMEBOL
+    fifa-rank: 13
+    group: K
+    primary-color: "&e"
+    secondary-color: "&9"
+    squad:
+      - {name: "Vargas", number: 1, pos: GK, starter: true}
+      - {name: "Munoz", number: 2, pos: DF, starter: true}
+      - {name: "Lucumi", number: 4, pos: DF, starter: true}
+      - {name: "Cuesta", number: 5, pos: DF, starter: true}
+      - {name: "Mojica", number: 3, pos: DF, starter: true}
+      - {name: "Rios", number: 6, pos: MF, starter: true}
+      - {name: "Lerma", number: 8, pos: MF, starter: true}
+      - {name: "James", number: 10, pos: MF, starter: true}
+      - {name: "Diaz", number: 7, pos: FW, starter: true}
+      - {name: "Cordoba", number: 9, pos: FW, starter: true}
+      - {name: "Arias", number: 11, pos: FW, starter: true}
+      - {name: "Ospina", number: 12, pos: GK, starter: false}
+      - {name: "Uribe", number: 14, pos: MF, starter: false}
+      - {name: "Borja", number: 15, pos: FW, starter: false}
+  MAR:
+    name: "Morocco"
+    name-ru: "Марокко"
+    confederation: CAF
+    fifa-rank: 14
+    group: C
+    primary-color: "&c"
+    secondary-color: "&a"
+    squad:
+      - {name: "Bono", number: 1, pos: GK, starter: true}
+      - {name: "Hakimi", number: 2, pos: DF, starter: true}
+      - {name: "Aguerd", number: 5, pos: DF, starter: true}
+      - {name: "Saiss", number: 6, pos: DF, starter: true}
+      - {name: "Mazraoui", number: 3, pos: DF, starter: true}
+      - {name: "Amrabat", number: 4, pos: MF, starter: true}
+      - {name: "Ounahi", number: 8, pos: MF, starter: true}
+      - {name: "Ziyech", number: 7, pos: MF, starter: true}
+      - {name: "En-Nesyri", number: 19, pos: FW, starter: true}
+      - {name: "Boufal", number: 17, pos: FW, starter: true}
+      - {name: "Adli", number: 10, pos: FW, starter: true}
+      - {name: "Munir", number: 12, pos: GK, starter: false}
+      - {name: "Sabiri", number: 11, pos: MF, starter: false}
+      - {name: "Hamdallah", number: 9, pos: FW, starter: false}
+  MEX:
+    name: "Mexico"
+    name-ru: "Мексика"
+    confederation: CONCACAF
+    fifa-rank: 15
+    group: A
+    primary-color: "&a"
+    secondary-color: "&f"
+    squad:
+      - {name: "Ochoa", number: 13, pos: GK, starter: true}
+      - {name: "Montes", number: 3, pos: DF, starter: true}
+      - {name: "Araujo", number: 2, pos: DF, starter: true}
+      - {name: "Sanchez", number: 19, pos: DF, starter: true}
+      - {name: "Gallardo", number: 23, pos: DF, starter: true}
+      - {name: "Edson Alvarez", number: 4, pos: MF, starter: true}
+      - {name: "Romero", number: 7, pos: MF, starter: true}
+      - {name: "Pineda", number: 10, pos: MF, starter: true}
+      - {name: "Jimenez", number: 9, pos: FW, starter: true}
+      - {name: "Raul Jimenez", number: 11, pos: FW, starter: true}
+      - {name: "Vega", number: 21, pos: FW, starter: true}
+      - {name: "Malagon", number: 1, pos: GK, starter: false}
+      - {name: "Antuna", number: 17, pos: FW, starter: false}
+      - {name: "Rodriguez", number: 8, pos: MF, starter: false}
+  USA:
+    name: "United States"
+    name-ru: "США"
+    confederation: CONCACAF
+    fifa-rank: 16
+    group: D
+    primary-color: "&9"
+    secondary-color: "&f"
+    squad:
+      - {name: "Turner", number: 1, pos: GK, starter: true}
+      - {name: "Dest", number: 2, pos: DF, starter: true}
+      - {name: "Richards", number: 3, pos: DF, starter: true}
+      - {name: "Zimmerman", number: 4, pos: DF, starter: true}
+      - {name: "Robinson", number: 5, pos: DF, starter: true}
+      - {name: "Adams", number: 6, pos: MF, starter: true}
+      - {name: "McKennie", number: 8, pos: MF, starter: true}
+      - {name: "Reyna", number: 14, pos: MF, starter: true}
+      - {name: "Pulisic", number: 10, pos: FW, starter: true}
+      - {name: "Balogun", number: 9, pos: FW, starter: true}
+      - {name: "Weah", number: 11, pos: FW, starter: true}
+      - {name: "Steffen", number: 12, pos: GK, starter: false}
+      - {name: "Musah", number: 15, pos: MF, starter: false}
+      - {name: "Pepi", number: 16, pos: FW, starter: false}
+  SEN:
+    name: "Senegal"
+    name-ru: "Сенегал"
+    confederation: CAF
+    fifa-rank: 17
+    group: I
+    primary-color: "&a"
+    secondary-color: "&e"
+    squad:
+      - {name: "Mendy", number: 1, pos: GK, starter: true}
+      - {name: "Sabaly", number: 2, pos: DF, starter: true}
+      - {name: "Koulibaly", number: 4, pos: DF, starter: true}
+      - {name: "Diallo", number: 5, pos: DF, starter: true}
+      - {name: "Balloka", number: 3, pos: DF, starter: true}
+      - {name: "Gueye", number: 6, pos: MF, starter: true}
+      - {name: "Pape Gueye", number: 8, pos: MF, starter: true}
+      - {name: "I. Sarr", number: 14, pos: MF, starter: true}
+      - {name: "Mane", number: 10, pos: FW, starter: true}
+      - {name: "Dia", number: 9, pos: FW, starter: true}
+      - {name: "Jackson", number: 11, pos: FW, starter: true}
+      - {name: "Dieng", number: 16, pos: GK, starter: false}
+      - {name: "Camara", number: 15, pos: MF, starter: false}
+      - {name: "Diatta", number: 17, pos: FW, starter: false}
+  JPN:
+    name: "Japan"
+    name-ru: "Япония"
+    confederation: AFC
+    fifa-rank: 18
+    group: F
+    primary-color: "&f"
+    secondary-color: "&0"
+    squad:
+      - {name: "Suzuki", number: 1, pos: GK, starter: true}
+      - {name: "Ito", number: 2, pos: DF, starter: true}
+      - {name: "Tomiyasu", number: 4, pos: DF, starter: true}
+      - {name: "Itakura", number: 5, pos: DF, starter: true}
+      - {name: "Nagatomo", number: 3, pos: DF, starter: true}
+      - {name: "Endo", number: 6, pos: MF, starter: true}
+      - {name: "Kamada", number: 8, pos: MF, starter: true}
+      - {name: "Kubo", number: 10, pos: MF, starter: true}
+      - {name: "Mitoma", number: 7, pos: FW, starter: true}
+      - {name: "Maeda", number: 9, pos: FW, starter: true}
+      - {name: "Doan", number: 11, pos: FW, starter: true}
+      - {name: "Gonda", number: 12, pos: GK, starter: false}
+      - {name: "Tanaka", number: 14, pos: MF, starter: false}
+      - {name: "Ueda", number: 15, pos: FW, starter: false}
+  SUI:
+    name: "Switzerland"
+    name-ru: "Швейцария"
+    confederation: UEFA
+    fifa-rank: 19
+    group: B
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Sommer", number: 1, pos: GK, starter: true}
+      - {name: "Widmer", number: 3, pos: DF, starter: true}
+      - {name: "Akanji", number: 5, pos: DF, starter: true}
+      - {name: "Rodriguez", number: 13, pos: DF, starter: true}
+      - {name: "Vargas", number: 17, pos: DF, starter: true}
+      - {name: "Xhaka", number: 10, pos: MF, starter: true}
+      - {name: "Freuler", number: 8, pos: MF, starter: true}
+      - {name: "Rieder", number: 16, pos: MF, starter: true}
+      - {name: "Embolo", number: 7, pos: FW, starter: true}
+      - {name: "Ndoye", number: 11, pos: FW, starter: true}
+      - {name: "Shaqiri", number: 23, pos: FW, starter: true}
+      - {name: "Kobel", number: 21, pos: GK, starter: false}
+      - {name: "Zakaria", number: 6, pos: MF, starter: false}
+      - {name: "Amdouni", number: 9, pos: FW, starter: false}
+  IRN:
+    name: "Iran"
+    name-ru: "Иран"
+    confederation: AFC
+    fifa-rank: 20
+    group: G
+    primary-color: "&a"
+    secondary-color: "&f"
+    squad:
+      - {name: "Beiranvand", number: 1, pos: GK, starter: true}
+      - {name: "Moharrami", number: 2, pos: DF, starter: true}
+      - {name: "Kanaani", number: 4, pos: DF, starter: true}
+      - {name: "Khalilzadeh", number: 5, pos: DF, starter: true}
+      - {name: "Mohammadi", number: 3, pos: DF, starter: true}
+      - {name: "Ezatolahi", number: 6, pos: MF, starter: true}
+      - {name: "Ghoddos", number: 8, pos: MF, starter: true}
+      - {name: "Jahanbakhsh", number: 10, pos: MF, starter: true}
+      - {name: "Taremi", number: 9, pos: FW, starter: true}
+      - {name: "Azmoun", number: 20, pos: FW, starter: true}
+      - {name: "Torabi", number: 11, pos: FW, starter: true}
+      - {name: "Abedzadeh", number: 12, pos: GK, starter: false}
+      - {name: "Nourollahi", number: 14, pos: MF, starter: false}
+      - {name: "Ghayedi", number: 15, pos: FW, starter: false}
+  SWE:
+    name: "Sweden"
+    name-ru: "Швеция"
+    confederation: UEFA
+    fifa-rank: 22
+    group: F
+    primary-color: "&e"
+    secondary-color: "&9"
+    squad:
+      - {name: "Olsen", number: 1, pos: GK, starter: true}
+      - {name: "Krafth", number: 2, pos: DF, starter: true}
+      - {name: "Lindelof", number: 4, pos: DF, starter: true}
+      - {name: "Hien", number: 5, pos: DF, starter: true}
+      - {name: "Augustinsson", number: 3, pos: DF, starter: true}
+      - {name: "Kulusevski", number: 10, pos: MF, starter: true}
+      - {name: "Olsson", number: 8, pos: MF, starter: true}
+      - {name: "Svanberg", number: 6, pos: MF, starter: true}
+      - {name: "Isak", number: 9, pos: FW, starter: true}
+      - {name: "Gyokeres", number: 11, pos: FW, starter: true}
+      - {name: "Forsberg", number: 7, pos: FW, starter: true}
+      - {name: "Johansson", number: 12, pos: GK, starter: false}
+      - {name: "Karlsson", number: 14, pos: MF, starter: false}
+      - {name: "Elanga", number: 15, pos: FW, starter: false}
+  KOR:
+    name: "South Korea"
+    name-ru: "Южная Корея"
+    confederation: AFC
+    fifa-rank: 23
+    group: A
+    primary-color: "&c"
+    secondary-color: "&0"
+    squad:
+      - {name: "Kim Seung-gyu", number: 1, pos: GK, starter: true}
+      - {name: "Kim Min-jae", number: 4, pos: DF, starter: true}
+      - {name: "Kim Young-gwon", number: 19, pos: DF, starter: true}
+      - {name: "Lee Ki-je", number: 3, pos: DF, starter: true}
+      - {name: "Kim Moon-hwan", number: 15, pos: DF, starter: true}
+      - {name: "Hwang In-beom", number: 6, pos: MF, starter: true}
+      - {name: "Lee Jae-sung", number: 10, pos: MF, starter: true}
+      - {name: "Son Heung-min", number: 7, pos: MF, starter: true}
+      - {name: "Hwang Hee-chan", number: 11, pos: FW, starter: true}
+      - {name: "Cho Gue-sung", number: 9, pos: FW, starter: true}
+      - {name: "Lee Kang-in", number: 18, pos: FW, starter: true}
+      - {name: "Jo Hyeon-woo", number: 21, pos: GK, starter: false}
+      - {name: "Jung Woo-young", number: 5, pos: MF, starter: false}
+      - {name: "Oh Hyeon-gyu", number: 16, pos: FW, starter: false}
+  AUS:
+    name: "Australia"
+    name-ru: "Австралия"
+    confederation: AFC
+    fifa-rank: 24
+    group: D
+    primary-color: "&e"
+    secondary-color: "&a"
+    squad:
+      - {name: "Ryan", number: 1, pos: GK, starter: true}
+      - {name: "Degenek", number: 2, pos: DF, starter: true}
+      - {name: "Souttar", number: 4, pos: DF, starter: true}
+      - {name: "Rowles", number: 5, pos: DF, starter: true}
+      - {name: "Behich", number: 3, pos: DF, starter: true}
+      - {name: "Irvine", number: 6, pos: MF, starter: true}
+      - {name: "Metcalfe", number: 8, pos: MF, starter: true}
+      - {name: "McGree", number: 10, pos: MF, starter: true}
+      - {name: "Boyle", number: 7, pos: FW, starter: true}
+      - {name: "Duke", number: 9, pos: FW, starter: true}
+      - {name: "Goodwin", number: 11, pos: FW, starter: true}
+      - {name: "Redmayne", number: 12, pos: GK, starter: false}
+      - {name: "Hrustic", number: 14, pos: MF, starter: false}
+      - {name: "Maclaren", number: 15, pos: FW, starter: false}
+  AUT:
+    name: "Austria"
+    name-ru: "Австрия"
+    confederation: UEFA
+    fifa-rank: 25
+    group: J
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Pentz", number: 1, pos: GK, starter: true}
+      - {name: "Posch", number: 2, pos: DF, starter: true}
+      - {name: "Lienhart", number: 4, pos: DF, starter: true}
+      - {name: "Wober", number: 5, pos: DF, starter: true}
+      - {name: "Mwene", number: 3, pos: DF, starter: true}
+      - {name: "Schlager", number: 6, pos: MF, starter: true}
+      - {name: "Laimer", number: 8, pos: MF, starter: true}
+      - {name: "Baumgartner", number: 10, pos: MF, starter: true}
+      - {name: "Sabitzer", number: 9, pos: FW, starter: true}
+      - {name: "Arnautovic", number: 7, pos: FW, starter: true}
+      - {name: "Gregoritsch", number: 11, pos: FW, starter: true}
+      - {name: "Schlager G", number: 12, pos: GK, starter: false}
+      - {name: "Seiwald", number: 14, pos: MF, starter: false}
+  SCO:
+    name: "Scotland"
+    name-ru: "Шотландия"
+    confederation: UEFA
+    fifa-rank: 27
+    group: C
+    primary-color: "&1"
+    secondary-color: "&9"
+    squad:
+      - {name: "Gordon", number: 1, pos: GK, starter: true}
+      - {name: "Ralston", number: 2, pos: DF, starter: true}
+      - {name: "Hendry", number: 4, pos: DF, starter: true}
+      - {name: "McKenna", number: 5, pos: DF, starter: true}
+      - {name: "Robertson", number: 3, pos: DF, starter: true}
+      - {name: "McTominay", number: 8, pos: MF, starter: true}
+      - {name: "Gilmour", number: 14, pos: MF, starter: true}
+      - {name: "McGinn", number: 7, pos: MF, starter: true}
+      - {name: "Adams", number: 9, pos: FW, starter: true}
+      - {name: "Dykes", number: 10, pos: FW, starter: true}
+      - {name: "Christie", number: 11, pos: FW, starter: true}
+      - {name: "Gunn", number: 12, pos: GK, starter: false}
+      - {name: "McLean", number: 6, pos: MF, starter: false}
+      - {name: "Shankland", number: 19, pos: FW, starter: false}
+  TUR:
+    name: "Türkiye"
+    name-ru: "Турция"
+    confederation: UEFA
+    fifa-rank: 28
+    group: D
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Gunok", number: 1, pos: GK, starter: true}
+      - {name: "Kadioglu", number: 3, pos: DF, starter: true}
+      - {name: "Demiral", number: 4, pos: DF, starter: true}
+      - {name: "Bardakci", number: 5, pos: DF, starter: true}
+      - {name: "Muldur", number: 2, pos: DF, starter: true}
+      - {name: "Calhanoglu", number: 10, pos: MF, starter: true}
+      - {name: "Yuksek", number: 6, pos: MF, starter: true}
+      - {name: "Guler", number: 8, pos: MF, starter: true}
+      - {name: "Yilmaz", number: 17, pos: FW, starter: true}
+      - {name: "Akturkoglu", number: 7, pos: FW, starter: true}
+      - {name: "Yildiz", number: 11, pos: FW, starter: true}
+      - {name: "Bayindir", number: 12, pos: GK, starter: false}
+      - {name: "Ozcan", number: 14, pos: MF, starter: false}
+      - {name: "Akgun", number: 9, pos: FW, starter: false}
+  ECU:
+    name: "Ecuador"
+    name-ru: "Эквадор"
+    confederation: CONMEBOL
+    fifa-rank: 30
+    group: E
+    primary-color: "&e"
+    secondary-color: "&9"
+    squad:
+      - {name: "Galindez", number: 1, pos: GK, starter: true}
+      - {name: "Estupinan", number: 2, pos: DF, starter: true}
+      - {name: "Torres", number: 3, pos: DF, starter: true}
+      - {name: "Hincapie", number: 4, pos: DF, starter: true}
+      - {name: "Preciado", number: 5, pos: DF, starter: true}
+      - {name: "Caicedo", number: 6, pos: MF, starter: true}
+      - {name: "Franco", number: 8, pos: MF, starter: true}
+      - {name: "Paez", number: 10, pos: MF, starter: true}
+      - {name: "Valencia", number: 11, pos: FW, starter: true}
+      - {name: "Rodriguez", number: 9, pos: FW, starter: true}
+      - {name: "Mena", number: 7, pos: FW, starter: true}
+      - {name: "Dominguez", number: 12, pos: GK, starter: false}
+      - {name: "Sarmiento", number: 14, pos: MF, starter: false}
+      - {name: "Plata", number: 15, pos: FW, starter: false}
+  CZE:
+    name: "Czechia"
+    name-ru: "Чехия"
+    confederation: UEFA
+    fifa-rank: 31
+    group: A
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Stanek", number: 1, pos: GK, starter: true}
+      - {name: "Coufal", number: 2, pos: DF, starter: true}
+      - {name: "Holes", number: 3, pos: DF, starter: true}
+      - {name: "Krejci", number: 4, pos: DF, starter: true}
+      - {name: "Jurasek", number: 5, pos: DF, starter: true}
+      - {name: "Soucek", number: 22, pos: MF, starter: true}
+      - {name: "Kral", number: 8, pos: MF, starter: true}
+      - {name: "Cerny", number: 17, pos: MF, starter: true}
+      - {name: "Schick", number: 10, pos: FW, starter: true}
+      - {name: "Chory", number: 9, pos: FW, starter: true}
+      - {name: "Hlozek", number: 11, pos: FW, starter: true}
+      - {name: "Kovar", number: 16, pos: GK, starter: false}
+      - {name: "Provod", number: 12, pos: MF, starter: false}
+      - {name: "Lingr", number: 14, pos: FW, starter: false}
+  EGY:
+    name: "Egypt"
+    name-ru: "Египет"
+    confederation: CAF
+    fifa-rank: 33
+    group: G
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Abou Gabal", number: 1, pos: GK, starter: true}
+      - {name: "Hegazi", number: 2, pos: DF, starter: true}
+      - {name: "Abdelmonem", number: 4, pos: DF, starter: true}
+      - {name: "Hamdi", number: 5, pos: DF, starter: true}
+      - {name: "Tarek", number: 3, pos: DF, starter: true}
+      - {name: "Elneny", number: 6, pos: MF, starter: true}
+      - {name: "Fathy", number: 8, pos: MF, starter: true}
+      - {name: "Mohamed", number: 14, pos: MF, starter: true}
+      - {name: "Salah", number: 10, pos: FW, starter: true}
+      - {name: "Marmoush", number: 9, pos: FW, starter: true}
+      - {name: "Trézéguet", number: 11, pos: FW, starter: true}
+      - {name: "El Shenawy", number: 16, pos: GK, starter: false}
+      - {name: "Kamal", number: 15, pos: MF, starter: false}
+      - {name: "Adel", number: 17, pos: FW, starter: false}
+  ALG:
+    name: "Algeria"
+    name-ru: "Алжир"
+    confederation: CAF
+    fifa-rank: 34
+    group: J
+    primary-color: "&a"
+    secondary-color: "&f"
+    squad:
+      - {name: "MBolhi", number: 1, pos: GK, starter: true}
+      - {name: "Atal", number: 2, pos: DF, starter: true}
+      - {name: "Bensebaini", number: 4, pos: DF, starter: true}
+      - {name: "Mandi", number: 5, pos: DF, starter: true}
+      - {name: "Benlamri", number: 3, pos: DF, starter: true}
+      - {name: "Bennacer", number: 6, pos: MF, starter: true}
+      - {name: "Belaili", number: 8, pos: MF, starter: true}
+      - {name: "Mahrez", number: 7, pos: MF, starter: true}
+      - {name: "Boudaoui", number: 10, pos: FW, starter: true}
+      - {name: "Slimani", number: 9, pos: FW, starter: true}
+      - {name: "Ounas", number: 11, pos: FW, starter: true}
+      - {name: "Oukidja", number: 16, pos: GK, starter: false}
+      - {name: "Zorgane", number: 14, pos: MF, starter: false}
+      - {name: "Amoura", number: 15, pos: FW, starter: false}
+  QAT:
+    name: "Qatar"
+    name-ru: "Катар"
+    confederation: AFC
+    fifa-rank: 35
+    group: B
+    primary-color: "&1"
+    secondary-color: "&f"
+    squad:
+      - {name: "Al Sheeb", number: 1, pos: GK, starter: true}
+      - {name: "Khoukhi", number: 16, pos: DF, starter: true}
+      - {name: "Salman", number: 5, pos: DF, starter: true}
+      - {name: "Hassan", number: 2, pos: DF, starter: true}
+      - {name: "Madibo", number: 14, pos: DF, starter: true}
+      - {name: "Hatem", number: 6, pos: MF, starter: true}
+      - {name: "Al Haydos", number: 10, pos: MF, starter: true}
+      - {name: "Afif", number: 11, pos: MF, starter: true}
+      - {name: "Almoez Ali", number: 19, pos: FW, starter: true}
+      - {name: "Muntari", number: 9, pos: FW, starter: true}
+      - {name: "Boudiaf", number: 12, pos: FW, starter: true}
+      - {name: "Barsham", number: 22, pos: GK, starter: false}
+      - {name: "Al Rawahi", number: 8, pos: MF, starter: false}
+  CIV:
+    name: "Ivory Coast"
+    name-ru: "Кот-д’Ивуар"
+    confederation: CAF
+    fifa-rank: 37
+    group: E
+    primary-color: "&e"
+    secondary-color: "&a"
+    squad:
+      - {name: "Yehovan", number: 1, pos: GK, starter: true}
+      - {name: "Aurier", number: 17, pos: DF, starter: true}
+      - {name: "Ndicka", number: 21, pos: DF, starter: true}
+      - {name: "Bailly", number: 5, pos: DF, starter: true}
+      - {name: "Konan", number: 3, pos: DF, starter: true}
+      - {name: "Seri", number: 6, pos: MF, starter: true}
+      - {name: "Sangare", number: 18, pos: MF, starter: true}
+      - {name: "Kessie", number: 8, pos: MF, starter: true}
+      - {name: "Pepe", number: 19, pos: FW, starter: true}
+      - {name: "Hallerk", number: 9, pos: FW, starter: true}
+      - {name: "Gradel", number: 15, pos: FW, starter: true}
+      - {name: "Gbohouo", number: 16, pos: GK, starter: false}
+      - {name: "Kragbe", number: 10, pos: MF, starter: false}
+      - {name: "Bamba", number: 11, pos: FW, starter: false}
+  TUN:
+    name: "Tunisia"
+    name-ru: "Тунис"
+    confederation: CAF
+    fifa-rank: 40
+    group: F
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Dahmen", number: 1, pos: GK, starter: true}
+      - {name: "Talbi", number: 2, pos: DF, starter: true}
+      - {name: "Meriah", number: 4, pos: DF, starter: true}
+      - {name: "Bronn", number: 5, pos: DF, starter: true}
+      - {name: "Maaloul", number: 3, pos: DF, starter: true}
+      - {name: "Skhiri", number: 6, pos: MF, starter: true}
+      - {name: "Laidouni", number: 8, pos: MF, starter: true}
+      - {name: "Msakni", number: 10, pos: MF, starter: true}
+      - {name: "Hazem", number: 7, pos: FW, starter: true}
+      - {name: "Sliti", number: 9, pos: FW, starter: true}
+      - {name: "Ben Slimane", number: 11, pos: FW, starter: true}
+      - {name: "Ben Said", number: 16, pos: GK, starter: false}
+      - {name: "Chaouat", number: 14, pos: FW, starter: false}
+  CAN:
+    name: "Canada"
+    name-ru: "Канада"
+    confederation: CONCACAF
+    fifa-rank: 41
+    group: B
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Crevau", number: 1, pos: GK, starter: true}
+      - {name: "Johnston", number: 2, pos: DF, starter: true}
+      - {name: "Miller", number: 5, pos: DF, starter: true}
+      - {name: "Waterman", number: 4, pos: DF, starter: true}
+      - {name: "Laryea", number: 22, pos: DF, starter: true}
+      - {name: "Eustaquio", number: 6, pos: MF, starter: true}
+      - {name: "Kone", number: 13, pos: MF, starter: true}
+      - {name: "David", number: 10, pos: MF, starter: true}
+      - {name: "Davies", number: 19, pos: FW, starter: true}
+      - {name: "Larin", number: 17, pos: FW, starter: true}
+      - {name: "Buchanan", number: 11, pos: FW, starter: true}
+      - {name: "Borjan", number: 18, pos: GK, starter: false}
+      - {name: "Osorio", number: 8, pos: MF, starter: false}
+      - {name: "Ugbo", number: 9, pos: FW, starter: false}
+  NOR:
+    name: "Norway"
+    name-ru: "Норвегия"
+    confederation: UEFA
+    fifa-rank: 43
+    group: I
+    primary-color: "&c"
+    secondary-color: "&9"
+    squad:
+      - {name: "Nyland", number: 1, pos: GK, starter: true}
+      - {name: "Pedersen", number: 2, pos: DF, starter: true}
+      - {name: "Hanche-Olsen", number: 4, pos: DF, starter: true}
+      - {name: "Ostigard", number: 5, pos: DF, starter: true}
+      - {name: "Meling", number: 3, pos: DF, starter: true}
+      - {name: "Aursnes", number: 6, pos: MF, starter: true}
+      - {name: "Berge", number: 8, pos: MF, starter: true}
+      - {name: "Odegaard", number: 10, pos: MF, starter: true}
+      - {name: "Haaland", number: 9, pos: FW, starter: true}
+      - {name: "Sorloth", number: 11, pos: FW, starter: true}
+      - {name: "Nusa", number: 7, pos: FW, starter: true}
+      - {name: "Dyngeland", number: 12, pos: GK, starter: false}
+      - {name: "Thorstvedt", number: 14, pos: MF, starter: false}
+      - {name: "Dybvik", number: 15, pos: FW, starter: false}
+  PAN:
+    name: "Panama"
+    name-ru: "Панама"
+    confederation: CONCACAF
+    fifa-rank: 45
+    group: L
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Mejia", number: 1, pos: GK, starter: true}
+      - {name: "Escobar", number: 2, pos: DF, starter: true}
+      - {name: "Cordoba", number: 4, pos: DF, starter: true}
+      - {name: "Cummings", number: 5, pos: DF, starter: true}
+      - {name: "Davis", number: 3, pos: DF, starter: true}
+      - {name: "Godoy", number: 6, pos: MF, starter: true}
+      - {name: "Carrasquilla", number: 8, pos: MF, starter: true}
+      - {name: "Waterman", number: 10, pos: MF, starter: true}
+      - {name: "Rodriguez", number: 9, pos: FW, starter: true}
+      - {name: "Fajardo", number: 11, pos: FW, starter: true}
+      - {name: "Barcenas", number: 7, pos: FW, starter: true}
+      - {name: "Mosquera", number: 12, pos: GK, starter: false}
+      - {name: "I. Diaz", number: 14, pos: MF, starter: false}
+  PAR:
+    name: "Paraguay"
+    name-ru: "Парагвай"
+    confederation: CONMEBOL
+    fifa-rank: 48
+    group: D
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Coronel", number: 1, pos: GK, starter: true}
+      - {name: "Alderete", number: 2, pos: DF, starter: true}
+      - {name: "Gomez", number: 4, pos: DF, starter: true}
+      - {name: "Balbuena", number: 5, pos: DF, starter: true}
+      - {name: "Espinoza", number: 3, pos: DF, starter: true}
+      - {name: "Almiron", number: 10, pos: MF, starter: true}
+      - {name: "Villasanti", number: 6, pos: MF, starter: true}
+      - {name: "Cardozo", number: 8, pos: MF, starter: true}
+      - {name: "Sanabria", number: 9, pos: FW, starter: true}
+      - {name: "Enciso", number: 11, pos: FW, starter: true}
+      - {name: "Sosa", number: 7, pos: FW, starter: true}
+      - {name: "Aguilar", number: 12, pos: GK, starter: false}
+      - {name: "Romero", number: 14, pos: MF, starter: false}
+  RSA:
+    name: "South Africa"
+    name-ru: "ЮАР"
+    confederation: CAF
+    fifa-rank: 55
+    group: A
+    primary-color: "&e"
+    secondary-color: "&0"
+    squad:
+      - {name: "Williams", number: 1, pos: GK, starter: true}
+      - {name: "Mudau", number: 2, pos: DF, starter: true}
+      - {name: "Mokoena", number: 4, pos: DF, starter: true}
+      - {name: "Kekana", number: 5, pos: DF, starter: true}
+      - {name: "Modiba", number: 6, pos: DF, starter: true}
+      - {name: "Zwane", number: 10, pos: MF, starter: true}
+      - {name: "Sithole", number: 8, pos: MF, starter: true}
+      - {name: "Mofokeng", number: 12, pos: MF, starter: true}
+      - {name: "Tau", number: 7, pos: FW, starter: true}
+      - {name: "Foster", number: 9, pos: FW, starter: true}
+      - {name: "Mabasa", number: 11, pos: FW, starter: true}
+      - {name: "Williams Jr", number: 16, pos: GK, starter: false}
+      - {name: "Modiba B", number: 15, pos: DF, starter: false}
+  KSA:
+    name: "Saudi Arabia"
+    name-ru: "Саудовская Аравия"
+    confederation: AFC
+    fifa-rank: 56
+    group: H
+    primary-color: "&a"
+    secondary-color: "&f"
+    squad:
+      - {name: "Al Owais", number: 1, pos: GK, starter: true}
+      - {name: "Al Ghannam", number: 2, pos: DF, starter: true}
+      - {name: "Al Bulayhi", number: 4, pos: DF, starter: true}
+      - {name: "Al Tambakti", number: 5, pos: DF, starter: true}
+      - {name: "Abdulhamid", number: 3, pos: DF, starter: true}
+      - {name: "Kanno", number: 6, pos: MF, starter: true}
+      - {name: "Al Faraj", number: 7, pos: MF, starter: true}
+      - {name: "Al Dawsari", number: 10, pos: MF, starter: true}
+      - {name: "Al Shehri", number: 9, pos: FW, starter: true}
+      - {name: "Al Buraikan", number: 11, pos: FW, starter: true}
+      - {name: "Al Amri", number: 8, pos: FW, starter: true}
+      - {name: "Al Rubaie", number: 12, pos: GK, starter: false}
+      - {name: "Al Najei", number: 14, pos: MF, starter: false}
+  UZB:
+    name: "Uzbekistan"
+    name-ru: "Узбекистан"
+    confederation: AFC
+    fifa-rank: 58
+    group: K
+    primary-color: "&9"
+    secondary-color: "&f"
+    squad:
+      - {name: "Yusupov", number: 1, pos: GK, starter: true}
+      - {name: "Ashurmatov", number: 2, pos: DF, starter: true}
+      - {name: "Sayfiev", number: 4, pos: DF, starter: true}
+      - {name: "Ergashev", number: 5, pos: DF, starter: true}
+      - {name: "Urunov", number: 3, pos: DF, starter: true}
+      - {name: "Masharipov", number: 6, pos: MF, starter: true}
+      - {name: "Shomurodov", number: 8, pos: MF, starter: true}
+      - {name: "Fayzullaev", number: 10, pos: MF, starter: true}
+      - {name: "Shomurodov E", number: 9, pos: FW, starter: true}
+      - {name: "Ashurmatov A", number: 7, pos: FW, starter: true}
+      - {name: "Urunov A", number: 11, pos: FW, starter: true}
+      - {name: "Nematov", number: 12, pos: GK, starter: false}
+      - {name: "Sergeev", number: 14, pos: FW, starter: false}
+  GHA:
+    name: "Ghana"
+    name-ru: "Гана"
+    confederation: CAF
+    fifa-rank: 60
+    group: L
+    primary-color: "&e"
+    secondary-color: "&0"
+    squad:
+      - {name: "Wollacott", number: 1, pos: GK, starter: true}
+      - {name: "Baba", number: 2, pos: DF, starter: true}
+      - {name: "Amartey", number: 4, pos: DF, starter: true}
+      - {name: "Djiku", number: 5, pos: DF, starter: true}
+      - {name: "Rahman", number: 3, pos: DF, starter: true}
+      - {name: "Partey", number: 6, pos: MF, starter: true}
+      - {name: "Kudus", number: 8, pos: MF, starter: true}
+      - {name: "J. Ayew", number: 10, pos: MF, starter: true}
+      - {name: "A. Ayew", number: 9, pos: FW, starter: true}
+      - {name: "Williams", number: 7, pos: FW, starter: true}
+      - {name: "Bukari", number: 11, pos: FW, starter: true}
+      - {name: "Ati-Zigi", number: 12, pos: GK, starter: false}
+      - {name: "Samed", number: 14, pos: MF, starter: false}
+      - {name: "Inkoom", number: 15, pos: FW, starter: false}
+  COD:
+    name: "DR Congo"
+    name-ru: "ДР Конго"
+    confederation: CAF
+    fifa-rank: 61
+    group: K
+    primary-color: "&9"
+    secondary-color: "&c"
+    squad:
+      - {name: "Mpasi", number: 1, pos: GK, starter: true}
+      - {name: "Masuaku", number: 2, pos: DF, starter: true}
+      - {name: "Mbemba", number: 4, pos: DF, starter: true}
+      - {name: "Tisserand", number: 5, pos: DF, starter: true}
+      - {name: "Kalulu", number: 3, pos: DF, starter: true}
+      - {name: "Moutoussamy", number: 6, pos: MF, starter: true}
+      - {name: "Bongonda", number: 8, pos: MF, starter: true}
+      - {name: "Bakambu", number: 10, pos: MF, starter: true}
+      - {name: "Bolasie", number: 7, pos: FW, starter: true}
+      - {name: "Wissa", number: 9, pos: FW, starter: true}
+      - {name: "Mbokani", number: 11, pos: FW, starter: true}
+      - {name: "Bertin", number: 12, pos: GK, starter: false}
+      - {name: "Kakuta", number: 14, pos: MF, starter: false}
+  IRQ:
+    name: "Iraq"
+    name-ru: "Ирак"
+    confederation: AFC
+    fifa-rank: 62
+    group: I
+    primary-color: "&a"
+    secondary-color: "&f"
+    squad:
+      - {name: "Jalal", number: 1, pos: GK, starter: true}
+      - {name: "Attwan", number: 2, pos: DF, starter: true}
+      - {name: "Adnan", number: 4, pos: DF, starter: true}
+      - {name: "Tahseen", number: 5, pos: DF, starter: true}
+      - {name: "Mhawi", number: 3, pos: DF, starter: true}
+      - {name: "Hussein", number: 6, pos: MF, starter: true}
+      - {name: "Bayesh", number: 8, pos: MF, starter: true}
+      - {name: "Amoura", number: 10, pos: MF, starter: true}
+      - {name: "Hussein A", number: 9, pos: FW, starter: true}
+      - {name: "Yahia", number: 11, pos: FW, starter: true}
+      - {name: "Iqbal", number: 7, pos: FW, starter: true}
+      - {name: "Hassan", number: 12, pos: GK, starter: false}
+      - {name: "Ali", number: 14, pos: MF, starter: false}
+  JOR:
+    name: "Jordan"
+    name-ru: "Иордания"
+    confederation: AFC
+    fifa-rank: 68
+    group: J
+    primary-color: "&c"
+    secondary-color: "&f"
+    squad:
+      - {name: "Al Essawi", number: 1, pos: GK, starter: true}
+      - {name: "Haddad", number: 2, pos: DF, starter: true}
+      - {name: "Al Arab", number: 4, pos: DF, starter: true}
+      - {name: "Al Ajalin", number: 5, pos: DF, starter: true}
+      - {name: "Abu Hasheesh", number: 3, pos: DF, starter: true}
+      - {name: "Al Naimat", number: 6, pos: MF, starter: true}
+      - {name: "Al Mardi", number: 8, pos: MF, starter: true}
+      - {name: "Olwan", number: 10, pos: MF, starter: true}
+      - {name: "Al Naimat Y", number: 9, pos: FW, starter: true}
+      - {name: "Al Attar", number: 11, pos: FW, starter: true}
+      - {name: "Al Rashdan", number: 7, pos: FW, starter: true}
+      - {name: "Abu Laila", number: 12, pos: GK, starter: false}
+      - {name: "Al Dardour", number: 14, pos: FW, starter: false}
+  CPV:
+    name: "Cape Verde"
+    name-ru: "Кабо-Верде"
+    confederation: CAF
+    fifa-rank: 71
+    group: H
+    primary-color: "&9"
+    secondary-color: "&c"
+    squad:
+      - {name: "Vozinha", number: 1, pos: GK, starter: true}
+      - {name: "Stopira", number: 2, pos: DF, starter: true}
+      - {name: "Lopes", number: 4, pos: DF, starter: true}
+      - {name: "Rocha", number: 5, pos: DF, starter: true}
+      - {name: "Borges", number: 3, pos: DF, starter: true}
+      - {name: "Babanco", number: 6, pos: MF, starter: true}
+      - {name: "Rodrigues", number: 8, pos: MF, starter: true}
+      - {name: "Duarte", number: 10, pos: MF, starter: true}
+      - {name: "Rodrigues G", number: 9, pos: FW, starter: true}
+      - {name: "Mendes", number: 7, pos: FW, starter: true}
+      - {name: "Teixeira", number: 11, pos: FW, starter: true}
+      - {name: "Ket", number: 12, pos: GK, starter: false}
+      - {name: "Pina", number: 14, pos: MF, starter: false}
+  BIH:
+    name: "Bosnia and Herzegovina"
+    name-ru: "Босния и Герцеговина"
+    confederation: UEFA
+    fifa-rank: 74
+    group: B
+    primary-color: "&9"
+    secondary-color: "&e"
+    squad:
+      - {name: "Vasilj", number: 1, pos: GK, starter: true}
+      - {name: "Kolasinac", number: 5, pos: DF, starter: true}
+      - {name: "Ahmedhodzic", number: 4, pos: DF, starter: true}
+      - {name: "Gazibegovic", number: 2, pos: DF, starter: true}
+      - {name: "Civic", number: 3, pos: DF, starter: true}
+      - {name: "Pjanić", number: 10, pos: MF, starter: true}
+      - {name: "Hadziahmetovic", number: 6, pos: MF, starter: true}
+      - {name: "Demirovic", number: 8, pos: MF, starter: true}
+      - {name: "Dzeko", number: 11, pos: FW, starter: true}
+      - {name: "Prevljak", number: 9, pos: FW, starter: true}
+      - {name: "Menalo", number: 7, pos: FW, starter: true}
+      - {name: "Sehic", number: 12, pos: GK, starter: false}
+      - {name: "Hajradinovic", number: 14, pos: MF, starter: false}
+      - {name: "Vrančić", number: 15, pos: MF, starter: false}
+  HAI:
+    name: "Haiti"
+    name-ru: "Гаити"
+    confederation: CONCACAF
+    fifa-rank: 87
+    group: C
+    primary-color: "&9"
+    secondary-color: "&c"
+    squad:
+      - {name: "Placide", number: 1, pos: GK, starter: true}
+      - {name: "Arcus", number: 2, pos: DF, starter: true}
+      - {name: "Alceus", number: 4, pos: DF, starter: true}
+      - {name: "Ade", number: 5, pos: DF, starter: true}
+      - {name: "Mephors", number: 3, pos: DF, starter: true}
+      - {name: "Attys", number: 6, pos: MF, starter: true}
+      - {name: "Pierrot", number: 10, pos: MF, starter: true}
+      - {name: "Nazon", number: 9, pos: MF, starter: true}
+      - {name: "Deori", number: 7, pos: FW, starter: true}
+      - {name: "Louicius", number: 11, pos: FW, starter: true}
+      - {name: "Etienne", number: 8, pos: FW, starter: true}
+      - {name: "Louis", number: 16, pos: GK, starter: false}
+      - {name: "Jean", number: 14, pos: MF, starter: false}
+  CUW:
+    name: "Curaçao"
+    name-ru: "Кюрасао"
+    confederation: CONCACAF
+    fifa-rank: 90
+    group: E
+    primary-color: "&9"
+    secondary-color: "&e"
+    squad:
+      - {name: "Room", number: 1, pos: GK, starter: true}
+      - {name: "Martina", number: 2, pos: DF, starter: true}
+      - {name: "Gaari", number: 4, pos: DF, starter: true}
+      - {name: "Bacuna", number: 5, pos: DF, starter: true}
+      - {name: "Conte", number: 3, pos: DF, starter: true}
+      - {name: "Bacuna L", number: 6, pos: MF, starter: true}
+      - {name: "Rosa", number: 8, pos: MF, starter: true}
+      - {name: "Janga", number: 10, pos: MF, starter: true}
+      - {name: "Janga R", number: 9, pos: FW, starter: true}
+      - {name: "Maria", number: 7, pos: FW, starter: true}
+      - {name: "Roemer", number: 11, pos: FW, starter: true}
+      - {name: "Ogenia", number: 12, pos: GK, starter: false}
+      - {name: "Antonisse", number: 14, pos: FW, starter: false}
+  NZL:
+    name: "New Zealand"
+    name-ru: "Новая Зеландия"
+    confederation: OFC
+    fifa-rank: 104
+    group: G
+    primary-color: "&f"
+    secondary-color: "&0"
+    squad:
+      - {name: "Marinovic", number: 1, pos: GK, starter: true}
+      - {name: "Boxall", number: 2, pos: DF, starter: true}
+      - {name: "Sutton", number: 4, pos: DF, starter: true}
+      - {name: "Payne", number: 5, pos: DF, starter: true}
+      - {name: "Surman", number: 3, pos: DF, starter: true}
+      - {name: "McGlinchey", number: 6, pos: MF, starter: true}
+      - {name: "Lewis", number: 8, pos: MF, starter: true}
+      - {name: "Wood", number: 9, pos: MF, starter: true}
+      - {name: "Garbett", number: 10, pos: FW, starter: true}
+      - {name: "Just", number: 7, pos: FW, starter: true}
+      - {name: "Waine", number: 11, pos: FW, starter: true}
+      - {name: "Singh", number: 12, pos: GK, starter: false}
+      - {name: "Rojas", number: 14, pos: MF, starter: false}

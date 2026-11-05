@@ -19,7 +19,10 @@ public final class Championship {
     private int pointsLoss;
     private long createdAt;
     private String championTeamId;
+    private UUID creatorId;
     private boolean playoffsActive;
+    /** Ordered FIFA nation codes for R16 World Cup bracket slots (size 16). */
+    private final List<String> bracketNationCodes = new ArrayList<>();
 
     private final Map<String, ChampTeam> teams = new HashMap<>();
     private final Map<String, ChampStanding> standings = new HashMap<>();
@@ -90,6 +93,18 @@ public final class Championship {
         this.createdAt = createdAt;
     }
 
+    public UUID getCreatorId() {
+        return creatorId;
+    }
+
+    public void setCreatorId(UUID creatorId) {
+        this.creatorId = creatorId;
+    }
+
+    public boolean isCreator(UUID playerId) {
+        return creatorId != null && playerId != null && creatorId.equals(playerId);
+    }
+
     public String getChampionTeamId() {
         return championTeamId;
     }
@@ -104,6 +119,45 @@ public final class Championship {
 
     public void setPlayoffsActive(boolean playoffsActive) {
         this.playoffsActive = playoffsActive;
+    }
+
+    public List<String> getBracketNationCodes() {
+        return Collections.unmodifiableList(bracketNationCodes);
+    }
+
+    public void setBracketNationCodes(List<String> codes) {
+        bracketNationCodes.clear();
+        if (codes != null) {
+            bracketNationCodes.addAll(codes);
+        }
+    }
+
+    public String getBracketNation(int slot) {
+        if (slot < 0 || slot >= bracketNationCodes.size()) {
+            return null;
+        }
+        return bracketNationCodes.get(slot);
+    }
+
+    public void setBracketNation(int slot, String nationCode) {
+        while (bracketNationCodes.size() <= slot) {
+            bracketNationCodes.add(null);
+        }
+        bracketNationCodes.set(slot, nationCode);
+    }
+
+    public void clearBracketNations() {
+        bracketNationCodes.clear();
+    }
+
+    public int filledBracketSlots() {
+        int count = 0;
+        for (String code : bracketNationCodes) {
+            if (code != null && !code.isBlank()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     public boolean hasPlayoffFixtures() {

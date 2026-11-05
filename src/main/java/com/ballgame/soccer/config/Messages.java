@@ -3,6 +3,7 @@ package com.ballgame.soccer.config;
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.game.GameState;
 import com.ballgame.soccer.util.Text;
+import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -174,6 +175,13 @@ public final class Messages {
             return;
         }
         sender.sendMessage(prefix + Text.color(message));
+    }
+
+    public void broadcast(String message) {
+        if (message == null || message.isBlank()) {
+            return;
+        }
+        Bukkit.broadcastMessage(prefix + Text.color(message));
     }
 
     private String applyPlaceholders(String message, Object... placeholders) {

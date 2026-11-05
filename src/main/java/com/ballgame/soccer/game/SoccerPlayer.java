@@ -13,7 +13,11 @@ public final class SoccerPlayer {
 
     private final UUID uuid;
     private final String name;
+    private String displayOverride;
     private TeamSide team;
+    private MatchRole role = MatchRole.PLAYER;
+    private int yellowCards;
+    private boolean sentOff;
 
     private double stamina;
     private boolean charging;
@@ -28,7 +32,17 @@ public final class SoccerPlayer {
     private int tackles;
     private int shots;
     private int passes;
+    private int passesCompleted;
+    private int passesReceived;
     private int saves;
+    private int fouls;
+    private long possessionTicks;
+
+    public static SoccerPlayer createReferee(Player player, double startingStamina) {
+        SoccerPlayer sp = new SoccerPlayer(player, null, startingStamina);
+        sp.role = MatchRole.REFEREE;
+        return sp;
+    }
 
     public SoccerPlayer(Player player, TeamSide team, double startingStamina) {
         this.uuid = player.getUniqueId();
@@ -70,11 +84,47 @@ public final class SoccerPlayer {
     }
 
     public String getName() {
+        return displayOverride != null && !displayOverride.isBlank() ? displayOverride : name;
+    }
+
+    public String getAccountName() {
         return name;
+    }
+
+    public void setDisplayOverride(String displayOverride) {
+        this.displayOverride = displayOverride;
     }
 
     public TeamSide getTeam() {
         return team;
+    }
+
+    public MatchRole getRole() {
+        return role;
+    }
+
+    public boolean isReferee() {
+        return role == MatchRole.REFEREE;
+    }
+
+    public boolean isPlayer() {
+        return role == MatchRole.PLAYER && !sentOff;
+    }
+
+    public boolean isSentOff() {
+        return sentOff;
+    }
+
+    public void setSentOff(boolean sentOff) {
+        this.sentOff = sentOff;
+    }
+
+    public int getYellowCards() {
+        return yellowCards;
+    }
+
+    public void addYellowCard() {
+        yellowCards++;
     }
 
     public void setTeam(TeamSide team) {
@@ -168,6 +218,42 @@ public final class SoccerPlayer {
     public int getPasses() { return passes; }
     public void addPass() { this.passes++; }
 
+    public int getPassesCompleted() { return passesCompleted; }
+    public void addPassCompleted() { this.passesCompleted++; }
+
+    public int getPassesReceived() { return passesReceived; }
+    public void addPassReceived() { this.passesReceived++; }
+
     public int getSaves() { return saves; }
     public void addSave() { this.saves++; }
+
+    public int getFouls() { return fouls; }
+    public void addFoul() { this.fouls++; }
+
+    public long getPossessionTicks() { return possessionTicks; }
+    public void addPossessionTick() { this.possessionTicks++; }
+
+    /** Completed passes / attempted passes, 0–100. */
+    public int passAccuracyPercent() {
+        if (passes <= 0) {
+            return 0;
+        }
+        return (int) Math.round((double) passesCompleted / passes * 100.0);
+    }
+
+    /** Match rating from 1.0 to 10.0 based on in-match performance. */
+    public double matchRating(long totalPossessionTicks) {
+        double rating = 5.0;
+        rating += goals * 1.4;
+        rating += assists * 0.7;
+        rating += saves * 0.45;
+        rating += shots * 0.15;
+        rating += passAccuracyPercent() * 0.015;
+        rating += passesReceived * 0.04;
+        if (totalPossessionTicks > 0) {
+            rating += (double) possessionTicks / totalPossessionTicks * 2.5;
+        }
+        rating -= fouls * 0.9;
+        return Math.max(1.0, Math.min(10.0, rating));
+    }
 }

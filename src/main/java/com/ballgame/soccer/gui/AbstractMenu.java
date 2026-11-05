@@ -12,11 +12,15 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public abstract class AbstractMenu implements InventoryHolder {
 
     protected final SoccerPlugin plugin;
     protected final Player viewer;
     protected final Inventory inventory;
+    private final Map<Integer, Runnable> clicks = new HashMap<>();
 
     protected AbstractMenu(SoccerPlugin plugin, Player viewer, String title, int rows) {
         this.plugin = plugin;
@@ -25,7 +29,8 @@ public abstract class AbstractMenu implements InventoryHolder {
     }
 
     public void open() {
-        MenuClicks.clear(Integer.toHexString(System.identityHashCode(inventory)));
+        clicks.clear();
+        MenuClicks.clear(menuKey());
         render();
         viewer.openInventory(inventory);
         viewer.playSound(viewer.getLocation(), Sound.BLOCK_CHEST_OPEN, 0.6f, 1.1f);
@@ -33,7 +38,13 @@ public abstract class AbstractMenu implements InventoryHolder {
 
     protected abstract void render();
 
-    public abstract void handleClick(int slot, ClickType type);
+    public void handleClick(int slot, ClickType type) {
+        Runnable action = clicks.get(slot);
+        if (action != null) {
+            clickSound();
+            action.run();
+        }
+    }
 
     @Override
     public Inventory getInventory() {
@@ -60,10 +71,11 @@ public abstract class AbstractMenu implements InventoryHolder {
     }
 
     protected void registerClick(int slot, Runnable action) {
-        MenuClicks.register(inventory(), slot, action);
+        clicks.put(slot, action);
+        MenuClicks.register(menuKey(), slot, action);
     }
 
-    private String inventory() {
+    private String menuKey() {
         return Integer.toHexString(System.identityHashCode(inventory));
     }
 

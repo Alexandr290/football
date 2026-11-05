@@ -11,7 +11,8 @@ import org.bukkit.util.Vector;
 final class BotMovement {
 
     private static final double WALK_BLOCKS_PER_TICK = 0.216;
-    private static final double SPRINT_BLOCKS_PER_TICK = 0.32;
+    /** Vanilla player sprint (~5.6 blocks/s at 20 tps). */
+    private static final double SPRINT_BLOCKS_PER_TICK = 0.28;
     private static final double ACCEL_PER_TICK = 0.046;
     private static final double DECEL_PER_TICK = 0.055;
     private static final double MAX_TURN_DEG_WALK = 42.0;
@@ -88,7 +89,7 @@ final class BotMovement {
             desiredSpeed *= TURN_SPEED_PENALTY;
         }
 
-        double sprintBurst = sprint ? 1.18 : 1.0;
+        double sprintBurst = 1.0;
         double accel = ACCEL_PER_TICK * Math.max(0.4, accelMul) * sprintBurst;
         double decel = DECEL_PER_TICK * Math.max(0.4, accelMul);
         if (speed < desiredSpeed) {

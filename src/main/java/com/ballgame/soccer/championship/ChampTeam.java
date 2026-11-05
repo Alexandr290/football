@@ -13,6 +13,8 @@ public final class ChampTeam {
     private final List<UUID> members = new ArrayList<>();
     private boolean eliminated;
     private String groupId;
+    /** FIFA nation code (e.g. ARG) when this team is a real national side. */
+    private String nationCode;
 
     public ChampTeam(String id, String name, UUID captain) {
         this.id = id;
@@ -77,5 +79,17 @@ public final class ChampTeam {
 
     public void setGroupId(String groupId) {
         this.groupId = groupId;
+    }
+
+    public String getNationCode() {
+        return nationCode;
+    }
+
+    public void setNationCode(String nationCode) {
+        this.nationCode = nationCode;
+    }
+
+    public boolean isNationalTeam() {
+        return nationCode != null && !nationCode.isBlank();
     }
 }

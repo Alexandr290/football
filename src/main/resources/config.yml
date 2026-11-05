@@ -5,7 +5,7 @@
 # the game without touching code. Colors use '&' codes (and hex &#RRGGBB).
 # =====================================================================
 
-config-version: 22
+config-version: 24
 
 settings:
   # Chat prefix (overrides the language file prefix when set).
@@ -28,6 +28,9 @@ game:
   max-players-per-team: 11
   # Seconds of the lobby countdown once enough players have joined.
   lobby-countdown: 15
+  # Wait this long for more humans; then empty XI slots are filled with bots
+  # before the 3..2..1 pre-match countdown.
+  lobby-bot-fill-grace: 15
   # Seconds of the kickoff countdown (3..2..1..GO) before the ball unlocks.
   kickoff-countdown: 3
   # Total match duration in seconds (split across halves).
@@ -75,6 +78,10 @@ game:
   # When true, /soccer quickjoin opens a menu to pick Red or Blue before joining.
   # Use /soccer quickjoin red|blue to skip the menu and join a side directly.
   quickjoin-team-pick: true
+  # Injury / stoppage time at the end of each half (max 3 minutes). Built from time
+  # lost to goal replays, celebrations, throw-ins, offside restarts and kickoffs.
+  stoppage-time-enabled: true
+  stoppage-time-max-seconds: 180
 
 # ---------------------------------------------------------------------
 # BungeeCord network — lobby sends players to the game backend for matches.
@@ -101,22 +108,23 @@ bots:
   enabled: true
   # How bots are rendered. They look and animate like real NPC players in every
   # mode except the last-resort armor stand.
-  #   auto        = Citizens NPC if installed, else a built-in packet player NPC
-  #                 (real player model + skin, no plugins needed), else Mannequin
-  #                 (1.21.4+), else armor stand.
-  #   player/npc  = force the built-in packet player NPC.
+  #   auto        = built-in packet player NPC on Paper 1.20.5+, else Mannequin
+  #                 (1.21.4+), else armor stand. Citizens is NOT used in auto.
+  #   player/npc  = force the built-in packet player NPC (recommended without Citizens).
   #   citizens | mannequin | armor_stand = force that specific backend.
-  visual: auto
+  visual: player
+  # false = plugin moves bots (walk/sprint on the pitch) and syncs Citizens each tick — reliable on arenas.
+  # true  = Citizens pathfinder (can stand still on custom fields or if the target is unreachable).
+  citizens-pathfind: false
   min-solo-count: 1
-  # Up to 10 bots can be added per side (opponents and/or your own team).
-  max-solo-count: 10
+  # Up to 11 bots can be added per side (opponents and/or your own team).
+  max-solo-count: 11
   default-solo-count: 4
   # How many AI team-mates are pre-selected when opening the solo menu (0 = none).
   default-teammate-count: 0
-  # Blocks per tick — walk matches vanilla (~0.216); sprint matches a real
-  # player-like burst so bots can accelerate into space and chase loose balls.
+  # Blocks per tick — walk/sprint match vanilla player movement (no extra burst).
   walk-speed: 0.216
-  sprint-speed: 0.36
+  sprint-speed: 0.28
   # Bot stamina. When enabled, bots can only sprint while they have stamina; once
   # drained they drop to a tired jog and must recover before sprinting again —
   # just like human players. This produces realistic late-game tempo swings.
@@ -164,6 +172,14 @@ referee:
   sprint-speed: 0.30
   sprint-threshold: 4.0
   whistle-enabled: true
+  # Bot referee when no human took the referee slot (visual NPC only).
+  # Auto foul/penalty rules are disabled — penalties happen only in shootouts.
+  auto-referee-enabled: false
+  auto-referee-keeper-hold-seconds: 6
+  auto-referee-player-hold-seconds: 5
+  auto-referee-time-waste-seconds: 12
+  auto-referee-hold-contest-seconds: 4
+  auto-referee-dissent-window-ticks: 80
 
 # ---------------------------------------------------------------------
 # Goal replay — TV-style cinematic playback after every goal.
@@ -225,7 +241,7 @@ crowd:
 championships:
   enabled: true
   min-teams-to-start: 2
-  max-teams: 16
+  max-teams: 48
   points-win: 3
   points-draw: 1
   points-loss: 0
@@ -235,6 +251,9 @@ championships:
   group-count: 8
   teams-per-group: 2
   advance-per-group: 1
+  # FIFA World Cup mode: pick 16 nations and start from round of 16
+  world-cup-r16: true
+  world-cup-bracket-size: 16
 
 # ---------------------------------------------------------------------
 # Ball physics - the heart of the plugin.
@@ -299,6 +318,8 @@ mechanics:
   shot-lift: 0.32
   # Multiplier applied to a pass (right-click) vs a shot (left-click).
   pass-power-multiplier: 0.6
+  # Lofted pass (press F): random height 4/5/6 blocks, up to ~10 blocks far.
+  loft-pass-horizontal-power: 0.30
   # Extra power granted while sprinting (adds player momentum to the ball).
   sprint-bonus: 0.35
   # Spin imparted based on where the player looks vs moves (curve shots).

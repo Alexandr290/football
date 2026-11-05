@@ -2,6 +2,7 @@ package com.ballgame.soccer.bot;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.config.SoccerSettings;
+import com.ballgame.soccer.game.Game;
 import com.ballgame.soccer.game.TeamSide;
 import com.ballgame.soccer.replay.MannequinSupport;
 import com.ballgame.soccer.util.Items;
@@ -29,10 +30,6 @@ import java.util.UUID;
  */
 final class BotVisual {
 
-    private static final double RUN_BOUNCE_MIN_SPEED_SQ = 0.018;
-    private static final double RUN_BOUNCE_HEIGHT = 0.14;
-    private static final double RUN_BOUNCE_STEP = 0.78;
-
     private enum Backend {
         CITIZENS, PLAYER_NPC, MANNEQUIN, ARMOR_STAND
     }
@@ -42,6 +39,7 @@ final class BotVisual {
     private final String displayName;
     private final TeamSide team;
     private final int squadIndex;
+    private final String skinOverride;
 
     private Backend backend = Backend.ARMOR_STAND;
     private CitizensSupport.CitizensNpc citizensNpc;
@@ -50,28 +48,67 @@ final class BotVisual {
     private ArmorStand fallback;
     private Location lastPos;
     private ItemStack[] armorKit;
-    private double runBouncePhase;
+
+    private final Game game;
 
     BotVisual(SoccerPlugin plugin, SoccerSettings settings, String displayName,
-              TeamSide team, int squadIndex) {
+              TeamSide team, int squadIndex, Game game) {
+        this(plugin, settings, displayName, team, squadIndex, null, game);
+    }
+
+    BotVisual(SoccerPlugin plugin, SoccerSettings settings, String displayName,
+              TeamSide team, int squadIndex, String skinOverride, Game game) {
         this.plugin = plugin;
         this.settings = settings;
         this.displayName = displayName;
         this.team = team;
         this.squadIndex = squadIndex;
+        this.skinOverride = skinOverride;
+        this.game = game;
         this.armorKit = teamArmor();
     }
 
+    void refreshArmorKit() {
+        armorKit = teamArmor();
+        refreshDisplayName();
+        if (entity instanceof org.bukkit.entity.LivingEntity living) {
+            equip(living);
+        }
+    }
+
+    private void refreshDisplayName() {
+        String label = Text.color(teamColor() + displayName);
+        if (entity instanceof LivingEntity living && living.isValid()) {
+            living.setCustomName(label);
+            living.setCustomNameVisible(true);
+        }
+        if (fallback != null && fallback.isValid()) {
+            fallback.setCustomName(label);
+            fallback.setCustomNameVisible(true);
+        }
+    }
+
+    /**
+     * Citizens pathfinding is optional. On custom pitches it often never starts;
+     * default is plugin-driven movement (same physics as armor-stand bots) with
+     * the NPC teleported each tick so they visibly run and sprint.
+     */
     boolean usesCitizensNavigation() {
-        return backend == Backend.CITIZENS && citizensNpc != null;
+        return backend == Backend.CITIZENS
+                && citizensNpc != null
+                && settings != null
+                && settings.botCitizensPathfind;
     }
 
     void spawn(Location location) {
+        spawn(location, 1);
+    }
+
+    void spawn(Location location, int projectedMatchBots) {
         remove();
         if (location == null || location.getWorld() == null) {
             return;
         }
-        runBouncePhase = 0.0;
         String mode = settings.botVisualType == null ? "auto" : settings.botVisualType.toLowerCase();
         if (shouldUseCitizens(mode) && trySpawnCitizens(location)) {
             return;
@@ -86,11 +123,9 @@ final class BotVisual {
     }
 
     private boolean shouldUseCitizens(String mode) {
-        return switch (mode) {
-            case "citizens" -> true;
-            case "player", "npc", "mannequin", "armor_stand", "armorstand" -> false;
-            default -> CitizensSupport.isAvailable();
-        };
+        // Citizens only when explicitly requested — auto must not pick it just because
+        // the plugin jar is on the server (most servers use the built-in packet NPC).
+        return "citizens".equals(mode);
     }
 
     private boolean shouldUsePlayerNpc(String mode) {
@@ -245,7 +280,8 @@ final class BotVisual {
     }
 
     private ItemStack[] teamArmor() {
-        Color color = team == TeamSide.RED ? Color.fromRGB(210, 45, 45) : Color.fromRGB(45, 85, 210);
+        Color color = game != null ? game.getTeamKitColor(team)
+                : (team == TeamSide.RED ? Color.fromRGB(210, 45, 45) : Color.fromRGB(45, 85, 210));
         return new ItemStack[] {
                 dyed(Material.LEATHER_HELMET, color),
                 dyed(Material.LEATHER_CHESTPLATE, color),
@@ -279,6 +315,9 @@ final class BotVisual {
     }
 
     private String resolveSkinName() {
+        if (skinOverride != null && !skinOverride.isBlank()) {
+            return skinOverride;
+        }
         List<String> skins = settings.botSkinNames;
         if (skins == null || skins.isEmpty()) {
             return displayName;
@@ -287,6 +326,9 @@ final class BotVisual {
     }
 
     private String teamColor() {
+        if (game != null) {
+            return game.getTeamKitChatColor(team);
+        }
         return team == TeamSide.RED ? settings.redChatColor : settings.blueChatColor;
     }
 
@@ -295,7 +337,7 @@ final class BotVisual {
             return null;
         }
         if (backend == Backend.CITIZENS && citizensNpc != null) {
-            float speedMod = sprinting ? 1.38f : 1.05f;
+            float speedMod = sprinting ? 1.0f : 1.0f;
             citizensNpc.navigateTo(target, sprinting, speedMod);
             citizensNpc.applyLocomotion(sprinting, velocity);
             Location synced = citizensNpc.readLocation();
@@ -358,15 +400,14 @@ final class BotVisual {
             return;
         }
         if (backend == Backend.PLAYER_NPC && playerNpc != null) {
-            Location visualLoc = withRunBounce(location, sprinting, velocity);
-            playerNpc.update(visualLoc, sprinting, visualLoc.getYaw());
+            playerNpc.update(location, sprinting, location.getYaw());
             lastPos = location.clone();
             return;
         }
         if (entity == null || !entity.isValid()) {
             return;
         }
-        Location at = withRunBounce(location, sprinting, velocity);
+        Location at = location.clone();
         at.setPitch(0f);
         entity.teleport(at);
         if (entity instanceof LivingEntity living) {
@@ -376,56 +417,19 @@ final class BotVisual {
         lastPos = location.clone();
     }
 
-    private Location withRunBounce(Location base, boolean sprinting, Vector velocity) {
-        Location visual = base.clone();
-        if (!shouldRunBounce(sprinting, velocity)) {
-            runBouncePhase *= 0.65;
-            if (Math.abs(runBouncePhase) < 0.01) {
-                runBouncePhase = 0.0;
-            }
-            return visual;
-        }
-        double speed = flatSpeed(velocity);
-        runBouncePhase += RUN_BOUNCE_STEP + Math.min(0.25, speed * 0.45);
-        double hop = Math.max(0.0, Math.sin(runBouncePhase)) * RUN_BOUNCE_HEIGHT;
-        visual.setY(visual.getY() + hop);
-        return visual;
-    }
-
-    private boolean shouldRunBounce(boolean sprinting, Vector velocity) {
-        if (!sprinting || velocity == null) {
-            return false;
-        }
-        Vector flat = velocity.clone();
-        flat.setY(0);
-        return flat.lengthSquared() >= RUN_BOUNCE_MIN_SPEED_SQ;
-    }
-
-    private double flatSpeed(Vector velocity) {
-        if (velocity == null) {
-            return 0.0;
-        }
-        return Math.hypot(velocity.getX(), velocity.getZ());
-    }
-
     private void applyVelocity(LivingEntity living, Vector velocity, boolean sprinting) {
+        if (living instanceof ArmorStand) {
+            return;
+        }
         if (velocity == null) {
             return;
         }
         Vector flat = velocity.clone();
         flat.setY(0);
         if (flat.lengthSquared() < 1.0e-4) {
-            if (sprinting && lastPos != null) {
-                Vector step = living.getLocation().toVector().subtract(lastPos.toVector());
-                step.setY(0);
-                if (step.lengthSquared() > 1.0e-4) {
-                    flat = step.normalize().multiply(Math.min(0.32, step.length() * 1.15));
-                }
-            }
+            return;
         }
-        if (flat.lengthSquared() > 1.0e-4) {
-            living.setVelocity(flat);
-        }
+        living.setVelocity(flat.multiply(0.35));
     }
 
     void swingArm() {
@@ -447,6 +451,45 @@ final class BotVisual {
                 player.swingMainHand();
             }
         }
+    }
+
+    void applyDivePose() {
+        if (backend == Backend.CITIZENS && citizensNpc != null) {
+            citizensNpc.applySneak(true);
+            return;
+        }
+        if (entity instanceof LivingEntity living) {
+            invokeBoolean(living, "setSneaking", true);
+            invokeBoolean(living, "setSwimming", true);
+        }
+    }
+
+    void clearDivePose() {
+        if (backend == Backend.CITIZENS && citizensNpc != null) {
+            citizensNpc.applySneak(false);
+            return;
+        }
+        if (entity instanceof LivingEntity living) {
+            invokeBoolean(living, "setSneaking", false);
+            invokeBoolean(living, "setSwimming", false);
+        }
+    }
+
+    boolean ownsEntity(Entity other) {
+        if (other == null) {
+            return false;
+        }
+        if (entity != null && entity.getUniqueId().equals(other.getUniqueId())) {
+            return true;
+        }
+        if (fallback != null && fallback.getUniqueId().equals(other.getUniqueId())) {
+            return true;
+        }
+        if (citizensNpc != null) {
+            Entity npcEntity = citizensNpc.getEntity();
+            return npcEntity != null && npcEntity.getUniqueId().equals(other.getUniqueId());
+        }
+        return false;
     }
 
     void remove() {

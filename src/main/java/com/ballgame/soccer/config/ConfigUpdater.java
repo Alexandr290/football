@@ -70,6 +70,16 @@ public final class ConfigUpdater {
         if (from < 21 && to >= 21) {
             migrateToV21(config);
         }
+        if (from < 24 && to >= 24) {
+            migrateToV24(config);
+        }
+    }
+
+    /** Bot squad cap raised to 11 per side. */
+    private static void migrateToV24(FileConfiguration config) {
+        if (config.getInt("bots.max-solo-count", 10) == 10) {
+            config.set("bots.max-solo-count", 11);
+        }
     }
 
     /** Bot squad size raised to 10 per side; team cap raised to fit player + allies. */

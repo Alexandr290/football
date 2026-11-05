@@ -2,11 +2,14 @@ package com.ballgame.soccer.game;
 
 import com.ballgame.soccer.SoccerPlugin;
 import com.ballgame.soccer.arena.Arena;
+import com.ballgame.soccer.bot.BotFormation;
 import com.ballgame.soccer.championship.ChampFixture;
+import com.ballgame.soccer.championship.ChampTeam;
 import com.ballgame.soccer.championship.Championship;
 import com.ballgame.soccer.championship.FixtureState;
 import com.ballgame.soccer.gui.QuickJoinModeMenu;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -196,6 +199,167 @@ public final class GameManager {
         return false;
     }
 
+    public boolean joinAsReferee(Player player, Arena arena) {
+        if (plugin.network().redirectJoin(player, arena.getName(), null)) {
+            return true;
+        }
+        Game existingPlayerGame = gamesByPlayer.get(player.getUniqueId());
+        if (existingPlayerGame != null) {
+            if (existingPlayerGame.isEnded()) {
+                existingPlayerGame.cancelScheduledCleanup();
+                existingPlayerGame.releaseAllPlayersQuietly();
+                gamesByPlayer.remove(player.getUniqueId());
+            } else {
+                plugin.messages().send(player, "already-in-game");
+                return false;
+            }
+        }
+        if (!arena.isPlayable()) {
+            plugin.messages().send(player, "arena-not-ready");
+            return false;
+        }
+        Game game = gamesByArena.get(key(arena));
+        if (game != null && game.isEnded()) {
+            Game ended = game;
+            ended.cancelScheduledCleanup();
+            ended.releaseAllPlayersQuietly();
+            ended.cleanupResourcesOnly();
+            gamesByArena.values().removeIf(g -> g == ended);
+            gamesByPlayer.values().removeIf(g -> g == ended);
+            game = null;
+        }
+        if (game == null) {
+            game = new Game(plugin, arena);
+            gamesByArena.put(key(arena), game);
+        }
+        if (game.isRefereeSlotTaken()) {
+            plugin.messages().send(player, "referee-slot-taken");
+            return false;
+        }
+        if (!plugin.settings().allowRejoin && game.getState() != GameState.WAITING
+                && game.getState() != GameState.COUNTDOWN) {
+            plugin.messages().send(player, "match-already-started");
+            return false;
+        }
+        if (game.addReferee(player)) {
+            gamesByPlayer.put(player.getUniqueId(), game);
+            plugin.network().clearLobbyReturn(player);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Join as referee of a solo bot match: red bots vs blue bots, no field human.
+     */
+    public boolean joinSoloAsReferee(Player player, Arena arena, int redBotCount, int blueBotCount,
+                                     BotDifficulty redDifficulty, BotDifficulty blueDifficulty) {
+        return joinSoloAsReferee(player, arena, redBotCount, blueBotCount,
+                redDifficulty, blueDifficulty, BotFormation.FOUR_FOUR_TWO, BotFormation.FOUR_FOUR_TWO);
+    }
+
+    public boolean joinSoloAsReferee(Player player, Arena arena, int redBotCount, int blueBotCount,
+                                     BotDifficulty redDifficulty, BotDifficulty blueDifficulty,
+                                     BotFormation formation) {
+        return joinSoloAsReferee(player, arena, redBotCount, blueBotCount,
+                redDifficulty, blueDifficulty, formation, formation);
+    }
+
+    public boolean joinSoloAsReferee(Player player, Arena arena, int redBotCount, int blueBotCount,
+                                     BotDifficulty redDifficulty, BotDifficulty blueDifficulty,
+                                     BotFormation redFormation, BotFormation blueFormation) {
+        if (!plugin.settings().botsEnabled) {
+            return joinAsReferee(player, arena);
+        }
+        Game existingPlayerGame = gamesByPlayer.get(player.getUniqueId());
+        if (existingPlayerGame != null) {
+            if (existingPlayerGame.isEnded()) {
+                existingPlayerGame.cancelScheduledCleanup();
+                existingPlayerGame.releaseAllPlayersQuietly();
+                gamesByPlayer.remove(player.getUniqueId());
+            } else {
+                plugin.messages().send(player, "already-in-game");
+                return false;
+            }
+        }
+        if (!arena.isPlayable()) {
+            plugin.messages().send(player, "arena-not-ready");
+            return false;
+        }
+
+        int redBots = Math.min(redBotCount, plugin.settings().botMaxSoloCount);
+        redBots = Math.min(redBots, plugin.settings().maxPlayersPerTeam);
+        int blueBots = Math.min(blueBotCount, plugin.settings().botMaxSoloCount);
+        blueBots = Math.min(blueBots, plugin.settings().maxPlayersPerTeam);
+        redBots = Math.max(1, redBots);
+        blueBots = Math.max(1, blueBots);
+
+        Game game = gamesByArena.get(key(arena));
+        if (game != null && !game.isEnded() && !game.isSoloMatch()) {
+            plugin.messages().send(player, "match-already-started");
+            return false;
+        }
+        if (game != null && game.isEnded()) {
+            Game ended = game;
+            ended.cancelScheduledCleanup();
+            ended.releaseAllPlayersQuietly();
+            ended.cleanupResourcesOnly();
+            gamesByArena.values().removeIf(g -> g == ended);
+            gamesByPlayer.values().removeIf(g -> g == ended);
+            game = null;
+        }
+        if (game != null && game.isRefereeSlotTaken()) {
+            plugin.messages().send(player, "referee-slot-taken");
+            return false;
+        }
+        if (game == null) {
+            game = new Game(plugin, arena);
+            game.setSoloMatch(true);
+            gamesByArena.put(key(arena), game);
+        } else {
+            game.setSoloMatch(true);
+        }
+        game.setBotDifficulty(TeamSide.RED, redDifficulty);
+        game.setBotDifficulty(TeamSide.BLUE, blueDifficulty);
+        game.setFormation(TeamSide.RED, redFormation);
+        game.setFormation(TeamSide.BLUE, blueFormation);
+
+        if (!game.addReferee(player)) {
+            return false;
+        }
+        gamesByPlayer.put(player.getUniqueId(), game);
+        plugin.network().clearLobbyReturn(player);
+
+        int currentRed = 0;
+        int currentBlue = 0;
+        for (var bot : game.getBots()) {
+            if (bot.getTeam() == TeamSide.RED) {
+                currentRed++;
+            } else if (bot.getTeam() == TeamSide.BLUE) {
+                currentBlue++;
+            }
+        }
+        for (int i = currentRed; i < redBots; i++) {
+            if (game.isTeamFull(TeamSide.RED)) {
+                break;
+            }
+            game.addBot(TeamSide.RED, i);
+        }
+        for (int i = currentBlue; i < blueBots; i++) {
+            if (game.isTeamFull(TeamSide.BLUE)) {
+                break;
+            }
+            game.addBot(TeamSide.BLUE, i);
+        }
+        game.deployFormationLineup();
+        plugin.messages().send(player, "referee-solo-ready",
+                "red", String.valueOf(redBots),
+                "blue", String.valueOf(blueBots),
+                "red_difficulty", plugin.messages().raw(game.getBotDifficulty(TeamSide.RED).langKey()),
+                "blue_difficulty", plugin.messages().raw(game.getBotDifficulty(TeamSide.BLUE).langKey()));
+        return true;
+    }
+
     /**
      * Auto-pick the best available arena (most populated joinable match, else any
      * empty playable arena) and join it, optionally after a team-pick GUI.
@@ -235,6 +399,23 @@ public final class GameManager {
 
     public boolean joinSolo(Player player, Arena arena, TeamSide team, int botCount,
                             int teammateBots, BotDifficulty redDifficulty, BotDifficulty blueDifficulty) {
+        return joinSolo(player, arena, team, botCount, teammateBots,
+                redDifficulty, blueDifficulty, BotFormation.FOUR_FOUR_TWO);
+    }
+
+    public boolean joinSolo(Player player, Arena arena, TeamSide team, int botCount,
+                            int teammateBots, BotDifficulty redDifficulty, BotDifficulty blueDifficulty,
+                            BotFormation formation) {
+        TeamSide playerTeam = team != null ? team : TeamSide.RED;
+        int redBots = playerTeam == TeamSide.RED ? teammateBots : botCount;
+        int blueBots = playerTeam == TeamSide.BLUE ? teammateBots : botCount;
+        return joinSolo(player, arena, team, redBots, blueBots,
+                redDifficulty, blueDifficulty, formation, formation);
+    }
+
+    public boolean joinSolo(Player player, Arena arena, TeamSide team, int redBots, int blueBots,
+                            BotDifficulty redDifficulty, BotDifficulty blueDifficulty,
+                            BotFormation redFormation, BotFormation blueFormation) {
         if (!plugin.settings().botsEnabled) {
             return join(player, arena, team);
         }
@@ -253,14 +434,15 @@ public final class GameManager {
             plugin.messages().send(player, "arena-not-ready");
             return false;
         }
-        int opponents = Math.min(botCount, plugin.settings().botMaxSoloCount);
-        opponents = Math.min(opponents, plugin.settings().maxPlayersPerTeam);
+        int maxPerTeam = plugin.settings().maxPlayersPerTeam;
         TeamSide playerTeam = team != null ? team : TeamSide.RED;
-        TeamSide botTeam = playerTeam.opposite();
-        // The player occupies one slot on their own side, so team-mate bots are
-        // capped one below the team limit.
-        int allies = Math.min(teammateBots, plugin.settings().botMaxSoloCount);
-        allies = Math.min(allies, Math.max(0, plugin.settings().maxPlayersPerTeam - 1));
+
+        int cappedRed = Math.min(redBots, plugin.settings().botMaxSoloCount);
+        int cappedBlue = Math.min(blueBots, plugin.settings().botMaxSoloCount);
+        cappedRed = Math.min(cappedRed, maxPerTeam - (playerTeam == TeamSide.RED ? 1 : 0));
+        cappedBlue = Math.min(cappedBlue, maxPerTeam - (playerTeam == TeamSide.BLUE ? 1 : 0));
+        cappedRed = Math.max(0, cappedRed);
+        cappedBlue = Math.max(0, cappedBlue);
 
         Game game = gamesByArena.get(key(arena));
         if (game != null && !game.isEnded() && !game.isSoloMatch()) {
@@ -283,6 +465,8 @@ public final class GameManager {
         }
         game.setBotDifficulty(TeamSide.RED, redDifficulty);
         game.setBotDifficulty(TeamSide.BLUE, blueDifficulty);
+        game.setFormation(TeamSide.RED, redFormation);
+        game.setFormation(TeamSide.BLUE, blueFormation);
         if (game.isFull() || (team != null && game.isTeamFull(team))) {
             plugin.messages().send(player, "game-full");
             return false;
@@ -293,30 +477,31 @@ public final class GameManager {
         gamesByPlayer.put(player.getUniqueId(), game);
         plugin.network().clearLobbyReturn(player);
 
-        int currentOpponentBots = 0;
-        int currentAllyBots = 0;
+        int currentRed = 0;
+        int currentBlue = 0;
         for (var bot : game.getBots()) {
-            if (bot.getTeam() == botTeam) {
-                currentOpponentBots++;
-            } else if (bot.getTeam() == playerTeam) {
-                currentAllyBots++;
+            if (bot.getTeam() == TeamSide.RED) {
+                currentRed++;
+            } else if (bot.getTeam() == TeamSide.BLUE) {
+                currentBlue++;
             }
         }
-        for (int i = currentOpponentBots; i < opponents; i++) {
-            if (game.isTeamFull(botTeam)) {
+        for (int i = currentRed; i < cappedRed; i++) {
+            if (game.isTeamFull(TeamSide.RED)) {
                 break;
             }
-            game.addBot(botTeam, i);
+            game.addBot(TeamSide.RED, i);
         }
-        for (int i = currentAllyBots; i < allies; i++) {
-            if (game.isTeamFull(playerTeam)) {
+        for (int i = currentBlue; i < cappedBlue; i++) {
+            if (game.isTeamFull(TeamSide.BLUE)) {
                 break;
             }
-            game.addBot(playerTeam, i);
+            game.addBot(TeamSide.BLUE, i);
         }
+        game.deployFormationLineup();
         plugin.messages().send(player, "solo-match-ready",
-                "count", String.valueOf(opponents),
-                "team", game.getTeamDisplayName(botTeam),
+                "red", String.valueOf(cappedRed),
+                "blue", String.valueOf(cappedBlue),
                 "red_difficulty", plugin.messages().raw(game.getBotDifficulty(TeamSide.RED).langKey()),
                 "blue_difficulty", plugin.messages().raw(game.getBotDifficulty(TeamSide.BLUE).langKey()));
         return true;
@@ -415,7 +600,18 @@ public final class GameManager {
             if (redDisplayName != null && blueDisplayName != null) {
                 game.setMatchTeamNames(redDisplayName, blueDisplayName);
             }
+            Championship championship = plugin.championships().get(championshipId);
+            ChampFixture fixture = championship != null ? championship.getFixture(fixtureId) : null;
+            if (championship != null && fixture != null) {
+                bindNationCodes(game, championship, fixture);
+            }
             gamesByArena.put(key(arena), game);
+        } else {
+            Championship championship = plugin.championships().get(championshipId);
+            ChampFixture fixture = championship != null ? championship.getFixture(fixtureId) : null;
+            if (championship != null && fixture != null) {
+                bindNationCodes(game, championship, fixture);
+            }
         }
         if (game.isFull()) {
             plugin.messages().send(player, "game-full");
@@ -470,18 +666,38 @@ public final class GameManager {
             game = new Game(plugin, arena);
             game.setChampionship(championship.getId(), fixture.getId());
             game.setMatchTeamNames(fixture.sideADisplay(championship), fixture.sideBDisplay(championship));
+            bindNationCodes(game, championship, fixture);
             game.setBotDifficulty(TeamSide.RED, redDifficulty);
             game.setBotDifficulty(TeamSide.BLUE, blueDifficulty);
             gamesByArena.put(key(arena), game);
+        } else {
+            bindNationCodes(game, championship, fixture);
         }
 
         int added = 0;
+        if (redBots <= 0 && blueBots <= 0
+                && (game.getRedNationCode() != null || game.getBlueNationCode() != null)) {
+            added += game.fillSquadBots(TeamSide.RED);
+            added += game.fillSquadBots(TeamSide.BLUE);
+            return added > 0 ? added : -1;
+        }
         added += addBotsToChampionshipSide(game, TeamSide.RED, Math.max(0, redBots));
         added += addBotsToChampionshipSide(game, TeamSide.BLUE, Math.max(0, blueBots));
         if (added == 0 && redBots <= 0 && blueBots <= 0) {
             return -1;
         }
         return added;
+    }
+
+    private void bindNationCodes(Game game, Championship championship, ChampFixture fixture) {
+        if (game == null || championship == null || fixture == null) {
+            return;
+        }
+        ChampTeam teamA = championship.getTeam(fixture.getTeamAId());
+        ChampTeam teamB = championship.getTeam(fixture.getTeamBId());
+        game.setNationCodes(
+                teamA != null ? teamA.getNationCode() : null,
+                teamB != null ? teamB.getNationCode() : null);
     }
 
     private int addBotsToChampionshipSide(Game game, TeamSide side, int requested) {
@@ -517,6 +733,115 @@ public final class GameManager {
             }
         }
         return null;
+    }
+
+    /**
+     * Creates a bot-only championship match (11 vs 11) and prepares kickoff.
+     */
+    public Game startChampionshipBotMatch(Championship championship, ChampFixture fixture, Arena arena) {
+        if (!plugin.settings().botsEnabled || championship == null || fixture == null || arena == null) {
+            return null;
+        }
+        if (fixture.getState() == FixtureState.COMPLETED || fixture.getState() == FixtureState.LIVE) {
+            return null;
+        }
+        if (!plugin.championships().canJoinFixture(championship, fixture)) {
+            return null;
+        }
+
+        Game existing = findGameByFixture(championship.getId(), fixture.getId());
+        if (existing != null && !existing.isEnded()) {
+            GameState state = existing.getState();
+            if (state != GameState.WAITING && state != GameState.COUNTDOWN) {
+                return null;
+            }
+            existing.removeAllBots();
+        }
+
+        Game arenaGame = gamesByArena.get(key(arena));
+        if (arenaGame != null && arenaGame != existing && !arenaGame.isEnded()) {
+            return null;
+        }
+
+        Game game = existing;
+        if (game == null || game.isEnded()) {
+            game = new Game(plugin, arena);
+            gamesByArena.put(key(arena), game);
+        }
+
+        game.setChampionship(championship.getId(), fixture.getId());
+        game.setMatchTeamNames(fixture.sideADisplay(championship), fixture.sideBDisplay(championship));
+        bindNationCodes(game, championship, fixture);
+        game.setBotOnlyMatch(true);
+        game.setBotDifficulty(TeamSide.RED, BotDifficulty.MEDIUM);
+        game.setBotDifficulty(TeamSide.BLUE, BotDifficulty.MEDIUM);
+
+        game.fillFullSquadsSilently();
+        if (game.getTeamCount(TeamSide.RED) < plugin.settings().maxPlayersPerTeam
+                || game.getTeamCount(TeamSide.BLUE) < plugin.settings().maxPlayersPerTeam) {
+            game.removeAllBots();
+            return null;
+        }
+        game.deployFormationLineup();
+        game.refreshBotKitVisuals();
+        game.tryStartBotOnlyLobby();
+        syncServerViewers();
+        return game;
+    }
+
+    /** Teleports every online player not in a match to the arena spectator spot. */
+    public void teleportServerToStadium(Arena arena, Game watchGame) {
+        Location spot = resolveStadiumSpot(arena);
+        if (spot == null) {
+            return;
+        }
+        Location view = spot.clone();
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            if (gamesByPlayer.containsKey(online.getUniqueId())) {
+                continue;
+            }
+            online.teleport(view);
+            online.setGameMode(org.bukkit.GameMode.SPECTATOR);
+            online.setAllowFlight(true);
+            online.setFlying(true);
+            if (watchGame != null) {
+                watchGame.attachServerViewer(online);
+            }
+        }
+    }
+
+    public void teleportServerToStadium(Arena arena) {
+        teleportServerToStadium(arena, getGame(arena));
+    }
+
+    public Location resolveStadiumSpot(Arena arena) {
+        if (arena == null) {
+            return null;
+        }
+        if (arena.getSpectator() != null) {
+            return arena.getSpectator();
+        }
+        if (arena.getLobby() != null) {
+            return arena.getLobby();
+        }
+        return arena.getBallSpawn();
+    }
+
+    /** Clears a pre-kickoff lobby when the fixture arena changes. */
+    public void resetFixtureLobbyGame(Championship championship, ChampFixture fixture) {
+        if (championship == null || fixture == null) {
+            return;
+        }
+        Game game = findGameByFixture(championship.getId(), fixture.getId());
+        if (game == null || game.isEnded()) {
+            return;
+        }
+        GameState state = game.getState();
+        if (state != GameState.WAITING && state != GameState.COUNTDOWN) {
+            return;
+        }
+        game.releaseAllPlayersQuietly();
+        endGame(game);
     }
 
     public void leave(Player player) {

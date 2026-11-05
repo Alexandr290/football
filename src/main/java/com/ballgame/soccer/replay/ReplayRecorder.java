@@ -40,9 +40,17 @@ public final class ReplayRecorder {
         ReplayAnimationTracker tracker = game.getReplayAnimations();
         for (SoccerPlayer sp : game.getParticipants()) {
             Player player = sp.getBukkitPlayer();
-            if (player != null && player.isOnline()) {
+            if (player != null && player.isOnline() && !sp.isReferee()) {
                 poses.put(player.getUniqueId(),
                         PlayerPose.capture(player, tracker != null ? tracker : new ReplayAnimationTracker()));
+            }
+        }
+        for (var bot : game.getBots()) {
+            SoccerPlayer profile = bot.getProfile();
+            Location botLoc = bot.getLocation();
+            if (profile != null && botLoc != null) {
+                poses.put(profile.getUuid(),
+                        new PlayerPose(botLoc, false, bot.isSprinting(), false, false));
             }
         }
         buffer.addLast(new ReplayFrame(game.getMatchTick(), ballLoc, poses));
@@ -65,5 +73,10 @@ public final class ReplayRecorder {
             return all;
         }
         return new ArrayList<>(all.subList(all.size() - clipFrames, all.size()));
+    }
+
+    /** Snapshot of the current buffer (e.g. at referee whistle). */
+    public List<ReplayFrame> snapshotClip(int clipSeconds) {
+        return extractClip(clipSeconds);
     }
 }

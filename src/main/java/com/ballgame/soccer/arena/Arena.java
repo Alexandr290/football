@@ -20,12 +20,12 @@ import java.util.List;
  */
 public final class Arena {
 
-    /** FIFA goal mouth height (blocks). Used when admins mark only the goal line on the ground. */
-    private static final double STANDARD_GOAL_HEIGHT = 2.44;
-    /** Ball center tolerance below/above the goal frame ({@link com.ballgame.soccer.ball.Ball} radius). */
-    private static final double GOAL_BALL_PADDING = 0.35;
-    /** Flat goal regions (pos1/pos2 at ground) use this minimum vertical span before trusting maxY. */
-    private static final double GOAL_MIN_MARKED_HEIGHT = 1.0;
+    /** Ball radius tolerance for line / post checks ({@link com.ballgame.soccer.ball.Ball}). */
+    private static final double GOAL_BALL_PADDING = 0.30;
+    /** Scoring window: goal-line floor (pos1/pos2) through 3 blocks up (see {@link #scoringCeiling}). */
+    private static final double GOAL_SCORING_HEIGHT = 3.0;
+    /** Post band — only lateral edges; crossbar / top-corner shots are valid goals. */
+    private static final double GOAL_FRAME_BAND = 0.35;
 
     private final String name;
 
@@ -38,6 +38,10 @@ public final class Arena {
     private Location blueSpawn;    // BLUE team spawn
     private Location lobby;        // pre-game waiting spot
     private Location spectator;    // optional spectator/camera spot
+    /** Penalty mark in front of the goal defended by RED (penalties awarded to BLUE). */
+    private Location redPenaltySpot;
+    /** Penalty mark in front of the goal defended by BLUE (penalties awarded to RED). */
+    private Location bluePenaltySpot;
 
     /** Custom touchlines marked with pos1/pos2 ({@code /soccer addoutline}). */
     private final List<TouchlineSegment> outLines = new ArrayList<>();
@@ -66,11 +70,37 @@ public final class Arena {
     }
 
     /**
+     * True when the ball hits a goalpost (lateral edge). Crossbar / upper-corner
+     * contact is not treated as woodwork — those can still be goals in the air.
+     */
+    public boolean isNearGoalFrame(Location loc) {
+        if (loc == null) {
+            return false;
+        }
+        return isNearGoalPost(redGoal, loc) || isNearGoalPost(blueGoal, loc);
+    }
+
+    private boolean isNearGoalPost(Cuboid goal, Location loc) {
+        if (goal == null || loc.getWorld() == null || !loc.getWorld().equals(goal.getWorld())) {
+            return false;
+        }
+        double floor = goalLineFloor(goal);
+        double y = loc.getY();
+        if (y < floor - GOAL_BALL_PADDING || y > scoringCeiling(goal) + GOAL_BALL_PADDING) {
+            return false;
+        }
+        double mouthMin = mouthMin(goal);
+        double mouthMax = mouthMax(goal);
+        double lateral = mouthLateralCoord(goal, loc);
+        return lateral - mouthMin < GOAL_FRAME_BAND || mouthMax - lateral < GOAL_FRAME_BAND;
+    }
+
+    /**
      * Returns which goal the ball is in, or null if neither.
      *
-     * <p>The ball centre must be inside the goal width/depth and below the
-     * crossbar (with a small padding for the ball radius). Shots over the bar
-     * do not count.</p>
+     * <p>The ball counts once any part of it has crossed the field-facing goal line
+     * (pos1/pos2) within that width and up to {@value #GOAL_SCORING_HEIGHT}
+     * blocks 1–3 above the line (in the air — not only when the ball lands).</p>
      */
     public TeamSide goalContaining(Location loc) {
         if (loc == null) {
@@ -87,151 +117,217 @@ public final class Arena {
 
     /**
      * Checks several points along the ball's path so fast shots cannot skip
-     * through a thin goal region between ticks.
+     * through a thin goal region between ticks. Also tests 3D plane crossings
+     * at the goal line plane within the allowed height window.
      */
     public TeamSide goalContainingAlongPath(Location from, Location to) {
         if (from == null || to == null) {
             return null;
         }
-        TeamSide atEnd = goalContaining(to);
-        if (atEnd != null) {
-            return atEnd;
+        TeamSide crossed = goalCrossedOnPath(from, to);
+        if (crossed != null) {
+            return crossed;
         }
-        TeamSide atStart = goalContaining(from);
-        if (atStart != null) {
-            return atStart;
-        }
-        int samples = 10;
-        for (int i = 1; i < samples; i++) {
-            double t = i / (double) samples;
+
+        double pathLen = from.distance(to);
+        int steps = Math.max(16, (int) Math.ceil(pathLen * 8.0));
+        Location prev = from;
+        for (int i = 1; i <= steps; i++) {
+            double t = i / (double) steps;
             Location sample = new Location(from.getWorld(),
                     from.getX() + (to.getX() - from.getX()) * t,
                     from.getY() + (to.getY() - from.getY()) * t,
                     from.getZ() + (to.getZ() - from.getZ()) * t);
-            TeamSide goal = goalContaining(sample);
-            if (goal != null) {
-                return goal;
+            crossed = goalCrossedOnPath(prev, sample);
+            if (crossed != null) {
+                return crossed;
             }
+            TeamSide at = goalContaining(sample);
+            if (at != null) {
+                return at;
+            }
+            prev = sample;
         }
         return null;
     }
 
     /**
-     * When the ball crosses the goal line outside the field footprint, award a
-     * goal if it is within the mouth (width) of a goal on that end.
+     * @deprecated Goals are detected only through {@link #goalContaining} and
+     * {@link #goalContainingAlongPath} on the pos1/pos2 segment.
      */
+    @Deprecated
     public TeamSide goalAtGoalLineExit(Location loc) {
-        if (field == null || loc == null || loc.getWorld() == null) {
-            return null;
-        }
-        double x = loc.getX();
-        double z = loc.getZ();
-        boolean insideX = x >= field.getMinX() && x <= field.getMaxX();
-        boolean insideZ = z >= field.getMinZ() && z <= field.getMaxZ();
-        if (insideX && insideZ) {
-            return null;
-        }
-
-        boolean touchlinesOnX = field.getSizeX() >= field.getSizeZ();
-        if (touchlinesOnX) {
-            if (!insideZ && insideX) {
-                return goalOnEndForAxisZ(x, loc.getY(), z < field.getMinZ());
-            }
-        } else {
-            if (!insideX && insideZ) {
-                return goalOnEndForAxisX(z, loc.getY(), x < field.getMinX());
-            }
-        }
         return null;
     }
 
-    private TeamSide goalOnEndForAxisZ(double x, double y, boolean lowEnd) {
-        TeamSide red = tryGoalMouthX(redGoal, TeamSide.RED, x, y);
-        TeamSide blue = tryGoalMouthX(blueGoal, TeamSide.BLUE, x, y);
-        if (red != null && blue == null) {
-            return red;
-        }
-        if (blue != null && red == null) {
-            return blue;
-        }
-        if (red != null) {
-            if (redGoal != null && isGoalOnLowZEnd(redGoal) == lowEnd) {
-                return TeamSide.RED;
-            }
-            if (blueGoal != null && isGoalOnLowZEnd(blueGoal) == lowEnd) {
-                return TeamSide.BLUE;
-            }
-            return red;
-        }
-        return null;
+    /** Mouth runs along X when pos1/pos2 span X wider than Z. */
+    private static boolean mouthAlongX(Cuboid goal) {
+        return goal.getSizeX() >= goal.getSizeZ();
     }
 
-    private TeamSide goalOnEndForAxisX(double z, double y, boolean lowEnd) {
-        TeamSide red = tryGoalMouthZ(redGoal, TeamSide.RED, z, y);
-        TeamSide blue = tryGoalMouthZ(blueGoal, TeamSide.BLUE, z, y);
-        if (red != null && blue == null) {
-            return red;
-        }
-        if (blue != null && red == null) {
-            return blue;
-        }
-        if (red != null) {
-            if (redGoal != null && isGoalOnLowXEnd(redGoal) == lowEnd) {
-                return TeamSide.RED;
-            }
-            if (blueGoal != null && isGoalOnLowXEnd(blueGoal) == lowEnd) {
-                return TeamSide.BLUE;
-            }
-            return red;
-        }
-        return null;
+    private static boolean lineAxisIsZ(Cuboid goal) {
+        return mouthAlongX(goal);
     }
 
-    private TeamSide tryGoalMouthX(Cuboid goal, TeamSide side, double x, double y) {
-        if (goal == null || !isWithinGoalHeight(goal, y)) {
-            return null;
-        }
-        double pad = 0.35;
-        if (x >= goal.getMinX() - pad && x <= goal.getMaxX() + pad) {
-            return side;
-        }
-        return null;
+    private static double goalLineFloor(Cuboid goal) {
+        return goal.getMinY();
     }
 
-    private TeamSide tryGoalMouthZ(Cuboid goal, TeamSide side, double z, double y) {
-        if (goal == null || !isWithinGoalHeight(goal, y)) {
-            return null;
+    /** Top of the 3-block scoring window (pos1/pos2 floor + {@value #GOAL_SCORING_HEIGHT}). */
+    private static double scoringCeiling(Cuboid goal) {
+        double configured = goal.getMaxY();
+        double expected = goalLineFloor(goal) + GOAL_SCORING_HEIGHT;
+        return Math.max(configured, expected);
+    }
+
+    private static double mouthMin(Cuboid goal) {
+        return mouthAlongX(goal) ? goal.getMinX() : goal.getMinZ();
+    }
+
+    private static double mouthMax(Cuboid goal) {
+        return mouthAlongX(goal) ? goal.getMaxX() : goal.getMaxZ();
+    }
+
+    private static double mouthLateralCoord(Cuboid goal, Location loc) {
+        return mouthAlongX(goal) ? loc.getX() : loc.getZ();
+    }
+
+    /** Goal line floor up through 3 blocks (blocks 1, 2, 3 above the line). */
+    private static boolean isWithinScoringHeight(Cuboid goal, double y) {
+        double floor = goalLineFloor(goal);
+        double ceiling = scoringCeiling(goal);
+        return y >= floor - GOAL_BALL_PADDING && y <= ceiling + GOAL_BALL_PADDING;
+    }
+
+    /** Exact pos1/pos2 mouth width (ball centre inside the posts). */
+    private static boolean isWithinScoringMouth(Cuboid goal, double lateral) {
+        double pad = 0.18;
+        double min = mouthMin(goal) + pad;
+        double max = mouthMax(goal) - pad;
+        if (max <= min) {
+            return false;
         }
-        double pad = 0.35;
-        if (z >= goal.getMinZ() - pad && z <= goal.getMaxZ() + pad) {
-            return side;
-        }
-        return null;
+        return lateral >= min && lateral <= max;
+    }
+
+    private static boolean isWithinScoringMouth(Cuboid goal, Location loc) {
+        return isWithinScoringMouth(goal, mouthLateralCoord(goal, loc));
     }
 
     private boolean isInsideGoalVolume(Cuboid goal, Location loc) {
         if (loc.getWorld() == null || !loc.getWorld().equals(goal.getWorld())) {
             return false;
         }
-        double pad = 0.35;
-        if (loc.getX() < goal.getMinX() - pad || loc.getX() > goal.getMaxX() + pad) {
+        if (!isWithinScoringHeight(goal, loc.getY())) {
             return false;
         }
-        if (loc.getZ() < goal.getMinZ() - pad || loc.getZ() > goal.getMaxZ() + pad) {
+        if (!isWithinScoringMouth(goal, loc)) {
             return false;
         }
-        return isWithinGoalHeight(goal, loc.getY());
+        return isPastGoalLine(goal, loc);
     }
 
-    private boolean isWithinGoalHeight(Cuboid goal, double y) {
-        double floorY = goal.getMinY() - GOAL_BALL_PADDING;
-        double ceilingY;
-        if (goal.getSizeY() < GOAL_MIN_MARKED_HEIGHT) {
-            ceilingY = goal.getMinY() + STANDARD_GOAL_HEIGHT + GOAL_BALL_PADDING;
-        } else {
-            ceilingY = goal.getMaxY() + GOAL_BALL_PADDING;
+    /** True when any part of the ball has crossed onto the net side of the goal line. */
+    private boolean isPastGoalLine(Cuboid goal, Location loc) {
+        if (field == null) {
+            return false;
         }
-        return y >= floorY && y <= ceilingY;
+        if (lineAxisIsZ(goal)) {
+            return isPastGoalLineCoord(goal, loc.getZ(), true);
+        }
+        return isPastGoalLineCoord(goal, loc.getX(), false);
+    }
+
+    private boolean isPastGoalLineCoord(Cuboid goal, double coord, boolean axisZ) {
+        double line = axisZ ? goalLineCoordinateZ(goal) : goalLineCoordinateX(goal);
+        boolean lowEnd = axisZ ? isGoalOnLowZEnd(goal) : isGoalOnLowXEnd(goal);
+        if (lowEnd) {
+            return coord - GOAL_BALL_PADDING < line;
+        }
+        return coord + GOAL_BALL_PADDING > line;
+    }
+
+    private boolean isOnFieldSideOfGoalLine(Cuboid goal, double coord, boolean axisZ) {
+        double line = axisZ ? goalLineCoordinateZ(goal) : goalLineCoordinateX(goal);
+        boolean lowEnd = axisZ ? isGoalOnLowZEnd(goal) : isGoalOnLowXEnd(goal);
+        if (lowEnd) {
+            return coord + GOAL_BALL_PADDING > line;
+        }
+        return coord - GOAL_BALL_PADDING < line;
+    }
+
+    /**
+     * Detects whether the ball path crossed the goal mouth plane from the pitch
+     * into the net within the allowed height window.
+     */
+    private TeamSide goalCrossedOnPath(Location from, Location to) {
+        TeamSide red = tryCrossGoalMouth(from, to, redGoal, TeamSide.RED);
+        if (red != null) {
+            return red;
+        }
+        return tryCrossGoalMouth(from, to, blueGoal, TeamSide.BLUE);
+    }
+
+    private TeamSide tryCrossGoalMouth(Location from, Location to, Cuboid goal, TeamSide side) {
+        if (goal == null || field == null || from.getWorld() == null
+                || !from.getWorld().equals(goal.getWorld())) {
+            return null;
+        }
+
+        boolean axisZ = lineAxisIsZ(goal);
+        double lineCoord = axisZ ? goalLineCoordinateZ(goal) : goalLineCoordinateX(goal);
+        double fromCoord = axisZ ? from.getZ() : from.getX();
+        double toCoord = axisZ ? to.getZ() : to.getX();
+
+        if (Math.abs(toCoord - fromCoord) < 1.0e-8) {
+            return null;
+        }
+
+        boolean fromPast = isPastGoalLineCoord(goal, fromCoord, axisZ);
+        boolean toPast = isPastGoalLineCoord(goal, toCoord, axisZ);
+
+        // Ball leaving the net — not a goal.
+        if (fromPast && !toPast) {
+            return null;
+        }
+        // Already fully inside; goalContaining handles the current position.
+        if (fromPast && toPast) {
+            return null;
+        }
+
+        boolean fromField = isOnFieldSideOfGoalLine(goal, fromCoord, axisZ);
+        boolean fromOnLine = Math.abs(fromCoord - lineCoord) <= GOAL_BALL_PADDING + 0.05;
+        if (!fromField && !fromOnLine) {
+            return null;
+        }
+
+        double t = (lineCoord - fromCoord) / (toCoord - fromCoord);
+        if (t < 0.0 || t > 1.0) {
+            return null;
+        }
+
+        double hitX = from.getX() + (to.getX() - from.getX()) * t;
+        double hitY = from.getY() + (to.getY() - from.getY()) * t;
+        double hitZ = from.getZ() + (to.getZ() - from.getZ()) * t;
+        if (!isWithinScoringHeight(goal, hitY)) {
+            return null;
+        }
+
+        Location hit = new Location(from.getWorld(), hitX, hitY, hitZ);
+        if (!isWithinScoringMouth(goal, hit)) {
+            return null;
+        }
+        return side;
+    }
+
+    /** Field-facing Z of the goal mouth (touchlines run along X). */
+    private double goalLineCoordinateZ(Cuboid goal) {
+        return isGoalOnLowZEnd(goal) ? goal.getMaxZ() : goal.getMinZ();
+    }
+
+    /** Field-facing X of the goal mouth (touchlines run along Z). */
+    private double goalLineCoordinateX(Cuboid goal) {
+        return isGoalOnLowXEnd(goal) ? goal.getMaxX() : goal.getMinX();
     }
 
     private boolean isGoalOnLowZEnd(Cuboid goal) {
@@ -392,6 +488,28 @@ public final class Arena {
         return side == TeamSide.RED ? redGoal : blueGoal;
     }
 
+    /**
+     * Marked penalty spot in front of the goal defended by {@code defendingGoal}.
+     * Optional — when unset, the game computes a spot from goal geometry.
+     */
+    public Location getPenaltySpotAgainst(TeamSide defendingGoal) {
+        if (defendingGoal == TeamSide.RED) {
+            return redPenaltySpot;
+        }
+        if (defendingGoal == TeamSide.BLUE) {
+            return bluePenaltySpot;
+        }
+        return null;
+    }
+
+    /** Penalty mark for the attacking team (they shoot at the opposite goal). */
+    public Location getPenaltySpotForAttack(TeamSide attacking) {
+        if (attacking == null) {
+            return null;
+        }
+        return getPenaltySpotAgainst(attacking.opposite());
+    }
+
     public List<TouchlineSegment> getOutLines() {
         return Collections.unmodifiableList(outLines);
     }
@@ -498,6 +616,12 @@ public final class Arena {
     public Location getSpectator() { return spectator; }
     public void setSpectator(Location spectator) { this.spectator = spectator; }
 
+    public Location getRedPenaltySpot() { return redPenaltySpot; }
+    public void setRedPenaltySpot(Location redPenaltySpot) { this.redPenaltySpot = redPenaltySpot; }
+
+    public Location getBluePenaltySpot() { return bluePenaltySpot; }
+    public void setBluePenaltySpot(Location bluePenaltySpot) { this.bluePenaltySpot = bluePenaltySpot; }
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
@@ -519,6 +643,8 @@ public final class Arena {
         Locations.save(section, "blue-spawn", blueSpawn);
         Locations.save(section, "lobby", lobby);
         Locations.save(section, "spectator", spectator);
+        Locations.save(section, "red-penalty-spot", redPenaltySpot);
+        Locations.save(section, "blue-penalty-spot", bluePenaltySpot);
         if (!outLines.isEmpty()) {
             ConfigurationSection lines = section.createSection("out-lines");
             for (int i = 0; i < outLines.size(); i++) {
@@ -544,6 +670,8 @@ public final class Arena {
         arena.blueSpawn = Locations.load(section, "blue-spawn");
         arena.lobby = Locations.load(section, "lobby");
         arena.spectator = Locations.load(section, "spectator");
+        arena.redPenaltySpot = Locations.load(section, "red-penalty-spot");
+        arena.bluePenaltySpot = Locations.load(section, "blue-penalty-spot");
         if (section.isConfigurationSection("out-lines")) {
             ConfigurationSection lines = section.getConfigurationSection("out-lines");
             for (String key : lines.getKeys(false)) {

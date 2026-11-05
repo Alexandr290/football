@@ -9,6 +9,7 @@ import com.ballgame.soccer.mechanics.KickActor;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.entity.Entity;
 import org.bukkit.util.Vector;
 
 import java.util.UUID;
@@ -24,6 +25,7 @@ public final class MatchBot implements KickActor {
     private final Game game;
     private final SoccerSettings settings;
     private final int squadIndex;
+    private final int formationSlot;
     private final BotRole role;
     private final BotAttributes attributes;
     private final BotMovement movement = new BotMovement();
@@ -47,16 +49,24 @@ public final class MatchBot implements KickActor {
     private double stamina;
     private boolean recovering;
 
-    public MatchBot(SoccerPlugin plugin, Game game, String name, TeamSide team, int squadIndex, Location spawn) {
+    public MatchBot(SoccerPlugin plugin, Game game, String name, TeamSide team,
+                    int squadIndex, BotRole role, int formationSlot, Location spawn) {
+        this(plugin, game, name, team, squadIndex, role, formationSlot, spawn, null);
+    }
+
+    public MatchBot(SoccerPlugin plugin, Game game, String name, TeamSide team,
+                    int squadIndex, BotRole role, int formationSlot, Location spawn,
+                    String skinOverride) {
         this.uuid = UUID.randomUUID();
         this.game = game;
         this.settings = plugin.settings();
         this.squadIndex = squadIndex;
-        this.role = BotRole.forSquadIndex(squadIndex);
+        this.formationSlot = formationSlot;
+        this.role = role != null ? role : BotRole.forSquadIndex(squadIndex);
         this.attributes = BotAttributes.generate(uuid, role, settings);
         this.profile = SoccerPlayer.createBot(uuid, name, team, attributes.maxStamina);
         this.stamina = attributes.maxStamina;
-        this.visual = new BotVisual(plugin, settings, name, team, squadIndex);
+        this.visual = new BotVisual(plugin, settings, name, team, squadIndex, skinOverride, game);
         this.location = spawn != null ? spawn.clone() : game.getArena().getBallSpawn();
         if (this.location != null) {
             this.location.setPitch(0f);
@@ -104,12 +114,24 @@ public final class MatchBot implements KickActor {
         return squadIndex;
     }
 
+    public int getFormationSlot() {
+        return formationSlot;
+    }
+
     public BotRole getRole() {
         return role;
     }
 
+    public void refreshKitVisual() {
+        visual.refreshArmorKit();
+    }
+
     public void remove() {
         visual.remove();
+    }
+
+    public boolean ownsEntity(Entity entity) {
+        return visual.ownsEntity(entity);
     }
 
     public void tick(long matchTick) {
@@ -135,7 +157,6 @@ public final class MatchBot implements KickActor {
                 case MEDIUM -> role == BotRole.GOALKEEPER ? 0 : 1;
                 case HARD -> 0;
             };
-            hasMoveIntent = false;
             BotAi.think(game, this, matchTick);
         }
 
@@ -181,9 +202,9 @@ public final class MatchBot implements KickActor {
         }
 
         double difficultySpeed = switch (game.getBotDifficulty(getTeam())) {
-            case EASY -> 0.84;
+            case EASY -> 0.88;
             case MEDIUM -> 1.0;
-            case HARD -> 1.12;
+            case HARD -> 1.05;
         };
         double difficultyAgility = switch (game.getBotDifficulty(getTeam())) {
             case EASY -> 0.75;
@@ -235,7 +256,7 @@ public final class MatchBot implements KickActor {
         sprintIntent = false;
     }
 
-    void faceLocation(Location target) {
+    public void faceLocation(Location target) {
         if (target == null || location == null) {
             return;
         }
@@ -266,11 +287,11 @@ public final class MatchBot implements KickActor {
         }
     }
 
-    void setActionCooldown(long ticks) {
+    public void setActionCooldown(long ticks) {
         this.actionCooldown = ticks;
     }
 
-    boolean canAct() {
+    public boolean canAct() {
         return actionCooldown <= 0;
     }
 
@@ -338,9 +359,22 @@ public final class MatchBot implements KickActor {
         visual.move(this.location, false, velocity);
     }
 
+    /** Goalkeeper dive animation during a penalty kick only. */
+    public void penaltyDive(Location diveSpot) {
+        holdPosition();
+        if (diveSpot != null) {
+            setLocation(diveSpot);
+        }
+        visual.applyDivePose();
+    }
+
+    public void resetStandingPose() {
+        visual.clearDivePose();
+    }
+
     public void syncVisual() {
         if (visual.usesCitizensNavigation()) {
-            if (hasMoveIntent && moveTarget != null) {
+            if (moveTarget != null) {
                 visual.navigate(moveTarget, sprinting, velocity);
             } else {
                 visual.applyFacing(bodyYaw, sprinting, velocity);
