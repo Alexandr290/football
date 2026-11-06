@@ -101,6 +101,10 @@ public final class RefereeController {
         if (!settings.refereeEnabled || pitch == null || center == null) {
             return;
         }
+        if (state == GameState.INTRO) {
+            // The pre-match show stages the officials itself.
+            return;
+        }
 
         if (whistleCooldown > 0) {
             whistleCooldown--;
@@ -243,11 +247,20 @@ public final class RefereeController {
 
         for (SoccerPlayer sp : players) {
             Player p = sp.getBukkitPlayer();
-            if (p == null || !p.isOnline() || sp.getTeam() != defending) {
+            if (p == null || !p.isOnline() || sp.getTeam() != defending || sp.isReferee()) {
                 continue;
             }
             double progress = pitchAxis.attackProgress(attacking, p.getLocation());
             defenderProgress.add(progress);
+        }
+        for (com.ballgame.soccer.bot.MatchBot bot : game.getBots()) {
+            if (bot.getTeam() != defending || bot.getLocation() == null) {
+                continue;
+            }
+            double progress = pitchAxis.attackProgress(attacking, bot.getLocation());
+            if (!Double.isNaN(progress)) {
+                defenderProgress.add(progress);
+            }
         }
 
         if (defenderProgress.isEmpty()) {
@@ -258,6 +271,11 @@ public final class RefereeController {
         double lineProgress = defenderProgress.size() >= 2
                 ? defenderProgress.get(1)
                 : defenderProgress.get(0);
+        // The assistant tracks the ball instead when it is nearer the goal line.
+        double ballProgress = pitchAxis.attackProgress(attacking, ballLoc);
+        if (!Double.isNaN(ballProgress)) {
+            lineProgress = Math.max(lineProgress, ballProgress);
+        }
 
         return progressToAxisT(pitchAxis, attacking, lineProgress);
     }
@@ -366,9 +384,129 @@ public final class RefereeController {
             return false;
         }
         return switch (state) {
-            case PLAYING, EXTRA_TIME, KICKOFF, THROW_IN, OFFSIDE, HALFTIME -> true;
+            case INTRO, PLAYING, EXTRA_TIME, KICKOFF, THROW_IN, OFFSIDE, HALFTIME -> true;
             default -> false;
         };
+    }
+
+    // ------------------------------------------------------------------
+    // Cutscene staging (pre-match show)
+    // ------------------------------------------------------------------
+
+    /** Whether the crew is spawned and can be choreographed. */
+    public boolean isStageable() {
+        return pitch != null && center != null;
+    }
+
+    public String officialName(RefereeActor.Role role) {
+        return switch (role) {
+            case CENTER -> settings.refereeName;
+            case ASSISTANT_LEFT -> settings.refereeAssistantNames.size() > 0
+                    ? settings.refereeAssistantNames.get(0) : "AR 1";
+            case ASSISTANT_RIGHT -> settings.refereeAssistantNames.size() > 1
+                    ? settings.refereeAssistantNames.get(1) : "AR 2";
+        };
+    }
+
+    public Location stagedLocation(RefereeActor.Role role) {
+        Location remembered = rememberedPos(role);
+        if (remembered != null) {
+            return remembered.clone();
+        }
+        RefereeActor actor = actor(role);
+        return actor != null && actor.getLocation() != null ? actor.getLocation().clone() : null;
+    }
+
+    /** Puts an official on a spot instantly, facing {@code lookAt}. */
+    public void stagePlace(RefereeActor.Role role, Location at, Location lookAt) {
+        RefereeActor actor = actor(role);
+        if (actor == null || at == null || pitch == null) {
+            return;
+        }
+        actor.setHidden(false);
+        Location spot = at.clone();
+        float yaw = lookAt != null ? pitch.yawToward(spot, lookAt) : at.getYaw();
+        actor.moveTo(spot, yaw, false, false, game.getMatchTick());
+        remember(role, spot);
+    }
+
+    /**
+     * Walks an official toward {@code target} at a fixed pace (blocks per tick).
+     * Faces the direction of travel while moving and {@code lookAt} once there.
+     */
+    public void stageStep(RefereeActor.Role role, Location target, double pace, Location lookAt) {
+        RefereeActor actor = actor(role);
+        if (actor == null || target == null || pitch == null) {
+            return;
+        }
+        actor.setHidden(false);
+        Location from = stagedLocation(role);
+        if (from == null) {
+            from = target.clone();
+        }
+        double dist = horizontalDistance(from, target);
+        boolean moving = pace > 0 && dist > 0.02;
+        Location next;
+        if (!moving || dist <= pace) {
+            next = target.clone();
+        } else {
+            double alpha = pace / dist;
+            next = new Location(target.getWorld(),
+                    from.getX() + (target.getX() - from.getX()) * alpha,
+                    target.getY(),
+                    from.getZ() + (target.getZ() - from.getZ()) * alpha);
+        }
+        float yaw;
+        if (moving) {
+            yaw = pitch.yawToward(from, target);
+        } else if (lookAt != null) {
+            yaw = pitch.yawToward(next, lookAt);
+        } else {
+            yaw = from.getYaw();
+        }
+        next.setYaw(yaw);
+        actor.moveTo(next, yaw, moving, moving && pace > settings.refereeWalkSpeed * 1.35,
+                game.getMatchTick());
+        remember(role, next);
+    }
+
+    /** Where the crew stands for a kickoff: centre ref near the spot, assistants on the halfway line. */
+    public Location kickoffTarget(RefereeActor.Role role) {
+        if (pitch == null) {
+            return null;
+        }
+        return switch (role) {
+            case CENTER -> pitch.atAxis(0.5, preferredSide * 2.5);
+            case ASSISTANT_LEFT -> pitch.touchlineLeft(0.5);
+            case ASSISTANT_RIGHT -> pitch.touchlineRight(0.5);
+        };
+    }
+
+    private RefereeActor actor(RefereeActor.Role role) {
+        if (role == null) {
+            return null;
+        }
+        return switch (role) {
+            case CENTER -> center;
+            case ASSISTANT_LEFT -> assistantLeft;
+            case ASSISTANT_RIGHT -> assistantRight;
+        };
+    }
+
+    private Location rememberedPos(RefereeActor.Role role) {
+        return switch (role) {
+            case CENTER -> centerPos;
+            case ASSISTANT_LEFT -> leftPos;
+            case ASSISTANT_RIGHT -> rightPos;
+        };
+    }
+
+    private void remember(RefereeActor.Role role, Location at) {
+        switch (role) {
+            case CENTER -> centerPos = at.clone();
+            case ASSISTANT_LEFT -> leftPos = at.clone();
+            case ASSISTANT_RIGHT -> rightPos = at.clone();
+        }
     }
 
     private Collection<Player> participants() {

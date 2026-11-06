@@ -22,6 +22,7 @@ import java.util.UUID;
 public final class AutoReferee {
 
     private static final double HOLD_SPEED = 0.38;
+    private static final double HOLD_ANCHOR_RADIUS = 4.0;
     private static final double PROXIMITY_HOLD_RADIUS = 1.2;
     private static final int SANCTION_COOLDOWN_TICKS = 200;
 
@@ -30,6 +31,7 @@ public final class AutoReferee {
     private final Map<String, Long> contestHoldStart = new HashMap<>();
     private final Map<UUID, Long> diveSneakStart = new HashMap<>();
     private long sanctionCooldownUntil;
+    private Location holdAnchor;
 
     public AutoReferee(SoccerPlugin plugin) {
         this.plugin = plugin;
@@ -37,6 +39,7 @@ public final class AutoReferee {
 
     public void reset() {
         holdStartTick.clear();
+        holdAnchor = null;
         contestHoldStart.clear();
         diveSneakStart.clear();
         sanctionCooldownUntil = 0;
@@ -85,11 +88,25 @@ public final class AutoReferee {
         UUID holder = ball.getLastTouchId();
         if (holder == null) {
             holdStartTick.clear();
+            holdAnchor = null;
             return;
+        }
+        if (!holdStartTick.containsKey(holder)) {
+            // Only the current holder's clock matters; stale entries from earlier
+            // possessions must not carry over to the next time they touch it.
+            holdStartTick.clear();
         }
         if (ball.getSpeed() > HOLD_SPEED) {
             holdStartTick.remove(holder);
+            holdAnchor = null;
             return;
+        }
+        // Carrying the ball up the pitch is not holding it up.
+        Location ballLoc = ball.getLocation();
+        if (holdAnchor == null || holdAnchor.getWorld() != ballLoc.getWorld()
+                || horizontalDistance(holdAnchor, ballLoc) > HOLD_ANCHOR_RADIUS) {
+            holdAnchor = ballLoc;
+            holdStartTick.remove(holder);
         }
 
         SoccerPlayer holderSp = game.getPlayer(holder);

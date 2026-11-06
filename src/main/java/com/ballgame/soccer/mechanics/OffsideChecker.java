@@ -125,7 +125,8 @@ public final class OffsideChecker {
 
     public static double secondLastOpponentProgress(List<Double> opponentProgresses) {
         if (opponentProgresses == null || opponentProgresses.isEmpty()) {
-            return Double.NEGATIVE_INFINITY;
+            // Nobody defending: there is no line to be beyond.
+            return Double.POSITIVE_INFINITY;
         }
         List<Double> sorted = new ArrayList<>(opponentProgresses);
         Collections.sort(sorted, Collections.reverseOrder());

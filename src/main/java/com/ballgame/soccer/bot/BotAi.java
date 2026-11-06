@@ -2,20 +2,24 @@ package com.ballgame.soccer.bot;
 
 import com.ballgame.soccer.arena.Arena;
 import com.ballgame.soccer.ball.Ball;
+import com.ballgame.soccer.config.SoccerSettings;
 import com.ballgame.soccer.event.BallKickEvent;
 import com.ballgame.soccer.game.BotDifficulty;
 import com.ballgame.soccer.game.Game;
 import com.ballgame.soccer.game.GameState;
 import com.ballgame.soccer.game.SoccerPlayer;
 import com.ballgame.soccer.game.TeamSide;
+import com.ballgame.soccer.mechanics.OffsideChecker;
 import com.ballgame.soccer.util.Cuboid;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Tactical AI for match bots.
@@ -66,6 +70,12 @@ public final class BotAi {
     private static final double KEEPER_ALERT_REACH_BONUS = 1.08;
     /** Base save rate for incoming shots (Medium). */
     private static final double KEEPER_SAVE_RATE_MEDIUM = 0.68;
+    /** With close control the ball is "at his feet" inside this distance. */
+    private static final double CONTROL_REACH = 1.6;
+    /** A jockeying defender holds this far goal-side of the ball. */
+    private static final double JOCKEY_DISTANCE = 1.75;
+    /** Markers stand this far goal-side of their man (clear of the holding call). */
+    private static final double MARK_DISTANCE = 1.9;
 
     /** Per-team ball chaser resolution result. */
     public record BallChaserState(UUID botId, boolean humanChasing) {
@@ -76,7 +86,20 @@ public final class BotAi {
 
     static void think(Game game, MatchBot bot, long matchTick) {
         GameState state = game.getState();
-        if ((!state.isLive() && state != GameState.KICKOFF) || game.isCelebrating()) {
+        if (state == GameState.KICKOFF) {
+            holdKickoffShape(game, bot, matchTick);
+            return;
+        }
+        if (!state.isLive()) {
+            return;
+        }
+        SoccerSettings settings = game.getSettings();
+        if (game.isCelebrating()) {
+            if (settings.botCelebrations) {
+                celebrate(game, bot);
+            } else {
+                bot.holdPosition();
+            }
             return;
         }
         Ball ball = game.getBall();
@@ -88,12 +111,47 @@ public final class BotAi {
         if (self == null) {
             return;
         }
+        bot.setHeadPitchBias(0f);
+        if (bot.isDown()) {
+            bot.lookAt(ballLoc);
+            return;
+        }
+        if (bot.isDiving()) {
+            if (isGoalkeeper(bot)) {
+                attemptGoalkeeperCatch(game, bot, ball, ballLoc, true, matchTick);
+            }
+            return;
+        }
 
         TeamSide team = bot.getTeam();
         Location ownGoal = goalCenter(game.getArena(), team);
         Location oppGoal = goalCenter(game.getArena(), team.opposite());
+
+        if (game.isBallHeldByKeeper()) {
+            bot.setCrouched(false);
+            handleKeeperHoldsBall(game, bot, ballLoc, ownGoal, oppGoal, matchTick);
+            return;
+        }
+        if (game.isKickoffPending() && handleKickoffRestart(game, bot, ballLoc, matchTick)) {
+            return;
+        }
+
+        // Players react to what they saw a moment ago, not to where the ball is right now.
+        Location seenBall = ballLoc;
+        Vector seenVelocity = ball.getVelocity();
+        if (settings.botReactionDelay) {
+            int delay = bot.perceptionDelayTicks();
+            seenBall = game.perceivedBallLocation(delay);
+            seenVelocity = game.perceivedBallVelocity(delay);
+        }
         double distToBall = horizontalDistance(self, ballLoc);
         TeamSide possession = ball.getLastTouchTeam();
+
+        bot.lookAt(seenBall);
+        scanPitch(game, bot, matchTick, possession == team ? 1.0 : 0.6);
+        if (distToBall < 14.0) {
+            bot.setTouchDirection(dribbleDirection(self, oppGoal, ownGoal, game, team));
+        }
 
         // Goalkeeper tracks the ball every tick — saves must not wait on action cooldown.
         if (isGoalkeeper(bot)) {
@@ -107,21 +165,374 @@ public final class BotAi {
         boolean isChaser = !humanChases && bot.getUuid().equals(chaserId);
 
         if (!isChaser) {
-            handleOffBall(game, bot, ballLoc, ownGoal, oppGoal, team, possession, chaserId);
+            bot.squareUpTo(null, matchTick, 0);
+            bot.tickJockey(false);
+            handleOffBall(game, bot, seenBall, ownGoal, oppGoal, team, possession, chaserId, matchTick);
+            return;
+        }
+        if (bot.isStaggered(matchTick)) {
+            // Lost the duel: off balance for a couple of heavy steps.
+            bot.squareUpTo(null, matchTick, 0);
+            bot.moveToward(seenBall, false, 0.5);
             return;
         }
 
-        if (distToBall > game.getSettings().kickReach * 0.9) {
-            Location chaseTarget = interceptPoint(ball, ballLoc, self, true, bot.getAttributes().anticipation);
+        boolean opponentsOnBall = possession != null && possession != team;
+        double engage = opponentsOnBall && settings.botTackleDuels ? 6.5 : settings.kickReach * 0.9;
+        if (distToBall > engage) {
+            bot.squareUpTo(null, matchTick, 0);
+            bot.tickJockey(false);
+            Location chaseTarget = interceptPoint(seenBall, seenVelocity, self, true,
+                    bot.getAttributes().anticipation);
             double urgency = 0.85 + 0.15 * dangerLevel(game, ballLoc, ownGoal, oppGoal);
-            bot.moveToward(chaseTarget, sprintDecision(bot, distToBall, 2.5, urgency), game.getSettings());
+            bot.moveToward(chaseTarget, sprintDecision(bot, distToBall, 2.5, urgency), settings);
             return;
         }
-        if (possession == team || possession == null) {
-            handleAttack(game, bot, ballLoc, oppGoal, ownGoal, distToBall, matchTick, canKick);
+        if (!opponentsOnBall) {
+            bot.squareUpTo(null, matchTick, 0);
+            bot.tickJockey(false);
+            handleAttack(game, bot, ball, ballLoc, oppGoal, ownGoal, distToBall, matchTick, canKick);
         } else {
             handlePress(game, bot, ball, ballLoc, oppGoal, distToBall, matchTick, canKick);
         }
+    }
+
+    // ==================================================================
+    // Restarts, stoppages and celebrations
+    // ==================================================================
+
+    /** Before the whistle: on the kickoff spot, eyes on the ball, the odd look around. */
+    private static void holdKickoffShape(Game game, MatchBot bot, long matchTick) {
+        Location self = bot.getLocation();
+        if (self == null) {
+            return;
+        }
+        Location ballLoc = game.getBallLocation();
+        Location spot = game.kickoffSpotFor(bot);
+        if (spot != null && horizontalDistance(self, spot) > 0.45) {
+            bot.moveToward(spot, false, 0.55);
+        } else {
+            bot.holdPosition();
+            if (ballLoc != null) {
+                bot.faceLocation(ballLoc);
+            }
+        }
+        if (ballLoc != null) {
+            bot.lookAt(ballLoc);
+        }
+        scanPitch(game, bot, matchTick, 0.5);
+    }
+
+    /**
+     * Whistle has gone but nobody has touched it: the taker rolls it to a
+     * team-mate, everybody else stays in position until the ball is in play.
+     */
+    private static boolean handleKickoffRestart(Game game, MatchBot bot, Location ballLoc, long matchTick) {
+        UUID takerId = game.getKickoffTakerId();
+        Location self = bot.getLocation();
+        if (takerId == null || self == null) {
+            return false;
+        }
+        bot.lookAt(ballLoc);
+        if (takerId.equals(bot.getUuid())) {
+            int waited = 100 - game.getKickoffPendingTicks();
+            int pause = 10 + (int) (aiRoll(bot, 0L, 0x41C0) * 10.0);
+            Location target = kickoffPassTarget(game, bot, ballLoc);
+            if (target == null) {
+                return false;
+            }
+            if (waited < pause) {
+                bot.holdPosition();
+                bot.faceLocation(ballLoc);
+                if (waited == pause / 2) {
+                    bot.glance(target, 6, matchTick);
+                }
+                return true;
+            }
+            if (horizontalDistance(self, ballLoc) > 1.3) {
+                bot.moveToward(ballLoc, false, 0.6);
+                return true;
+            }
+            bot.faceLocation(target);
+            game.botPassAt(bot, target, clamp(horizontalDistance(ballLoc, target) / 21.0, 0.26, 0.62));
+            bot.setActionCooldown(6);
+            return true;
+        }
+        Location spot = game.kickoffSpotFor(bot);
+        if (spot != null && horizontalDistance(self, spot) > 0.6) {
+            bot.moveToward(spot, false, 0.5);
+        } else {
+            bot.holdPosition();
+            bot.faceLocation(ballLoc);
+        }
+        return true;
+    }
+
+    /** Short pass back or square to the nearest team-mate in the kicking side's half. */
+    private static Location kickoffPassTarget(Game game, MatchBot taker, Location ballLoc) {
+        Location ownGoal = goalCenter(game.getArena(), taker.getTeam());
+        Location oppGoal = goalCenter(game.getArena(), taker.getTeam().opposite());
+        Vector forward = flatDirection(ownGoal, oppGoal);
+        if (forward.lengthSquared() < 1e-6) {
+            return null;
+        }
+        forward.normalize();
+        Location best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (Location mate : teammateLocations(game, taker, false)) {
+            Vector rel = flatDirection(ballLoc, mate);
+            double dist = rel.length();
+            if (dist < 3.5 || dist > 20.0 || rel.dot(forward) > 0.5) {
+                continue;
+            }
+            if (dist < bestScore) {
+                bestScore = dist;
+                best = mate;
+            }
+        }
+        for (SoccerPlayer sp : game.getHumanParticipants()) {
+            Player player = sp.getBukkitPlayer();
+            if (sp.isBot() || sp.getTeam() != taker.getTeam() || player == null || !player.isOnline()) {
+                continue;
+            }
+            Vector rel = flatDirection(ballLoc, player.getLocation());
+            double dist = rel.length();
+            if (dist < 3.0 || dist > 22.0 || rel.dot(forward) > 0.5) {
+                continue;
+            }
+            // Humans want the ball: favour them over a slightly closer bot.
+            if (dist - 6.0 < bestScore) {
+                bestScore = dist - 6.0;
+                best = player.getLocation();
+            }
+        }
+        return best != null ? best.clone() : null;
+    }
+
+    /** Positions of outfield team-mate bots (optionally including keepers), as copies. */
+    private static List<Location> teammateLocations(Game game, MatchBot bot, boolean includeKeeper) {
+        List<Location> out = new ArrayList<>();
+        for (MatchBot mate : game.getBots()) {
+            if (mate == bot || mate.getTeam() != bot.getTeam() || mate.getLocation() == null
+                    || (!includeKeeper && isGoalkeeper(mate))) {
+                continue;
+            }
+            out.add(mate.getLocation().clone());
+        }
+        return out;
+    }
+
+    /** Every opponent on the pitch (bots and humans), as copies. */
+    private static List<Location> opponentLocations(Game game, TeamSide team) {
+        List<Location> out = new ArrayList<>();
+        TeamSide opp = team.opposite();
+        for (MatchBot bot : game.getBots()) {
+            if (bot.getTeam() == opp && bot.getLocation() != null) {
+                out.add(bot.getLocation().clone());
+            }
+        }
+        for (SoccerPlayer sp : game.getHumanParticipants()) {
+            if (sp.isBot() || sp.getTeam() != opp) {
+                continue;
+            }
+            Player player = sp.getBukkitPlayer();
+            if (player != null && player.isOnline()) {
+                out.add(player.getLocation());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Shoulder checks: every second or two a player takes his eyes off the ball
+     * for a moment to see who is around him.
+     */
+    private static void scanPitch(Game game, MatchBot bot, long matchTick, double rate) {
+        if (bot.isGlancing(matchTick) || matchTick < bot.nextScanTick()) {
+            return;
+        }
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        int interval = (int) Math.round((22 + rnd.nextInt(30)) / Math.max(0.25, rate));
+        bot.scheduleNextScan(matchTick + interval);
+        Location self = bot.getLocation();
+        List<Location> options = new ArrayList<>();
+        for (MatchBot other : game.getBots()) {
+            Location at = other.getLocation();
+            if (other != bot && at != null) {
+                double d = horizontalDistance(self, at);
+                if (d > 3.0 && d < 30.0) {
+                    options.add(other.getEyeLocation());
+                }
+            }
+        }
+        for (SoccerPlayer sp : game.getHumanParticipants()) {
+            Player player = sp.getBukkitPlayer();
+            if (!sp.isBot() && player != null && player.isOnline()) {
+                double d = horizontalDistance(self, player.getLocation());
+                if (d > 3.0 && d < 30.0) {
+                    options.add(player.getEyeLocation());
+                }
+            }
+        }
+        if (!options.isEmpty()) {
+            bot.glance(options.get(rnd.nextInt(options.size())), 5 + rnd.nextInt(6), matchTick);
+        }
+    }
+
+    /**
+     * After a goal: the scorer wheels away to the corner flag, team-mates chase
+     * him down, the side that conceded trudges back with heads down.
+     */
+    private static void celebrate(Game game, MatchBot bot) {
+        Location self = bot.getLocation();
+        TeamSide scoring = game.getCelebrationTeam();
+        if (self == null || scoring == null) {
+            bot.holdPosition();
+            return;
+        }
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        bot.squareUpTo(null, 0L, 0);
+        if (bot.getTeam() != scoring) {
+            bot.setHeadPitchBias(isGoalkeeper(bot) ? 34f : 24f);
+            Location home = isGoalkeeper(bot) ? keeperSpawnSpot(game, bot.getTeam()) : game.kickoffSpotFor(bot);
+            if (home != null && horizontalDistance(self, home) > 1.2) {
+                bot.setCrouched(false);
+                bot.moveToward(home, false, 0.5);
+                bot.lookAt(home);
+            } else {
+                bot.holdPosition();
+                bot.setCrouched(isGoalkeeper(bot));
+            }
+            return;
+        }
+        bot.setHeadPitchBias(-8f);
+        if (isGoalkeeper(bot)) {
+            bot.holdPosition();
+            if (rnd.nextDouble() < 0.05) {
+                bot.swingArm();
+            }
+            if (rnd.nextDouble() < 0.025) {
+                bot.hop();
+            }
+            return;
+        }
+        UUID scorerId = game.getCelebrationScorerId();
+        if (bot.getUuid().equals(scorerId)) {
+            Location corner = celebrationCorner(game, bot);
+            if (horizontalDistance(self, corner) > 1.8) {
+                bot.moveToward(corner, bot.canSprint(), 1.0);
+                bot.lookAt(corner.clone().add(0, 3.0, 0));
+                if (rnd.nextDouble() < 0.12) {
+                    bot.swingArm();
+                }
+            } else {
+                bot.holdPosition();
+                Cuboid field = game.getArena().getField();
+                if (field != null) {
+                    bot.faceLocation(field.getCenter());
+                }
+                if (rnd.nextDouble() < 0.16) {
+                    bot.swingArm();
+                }
+                if (rnd.nextDouble() < 0.07) {
+                    bot.hop();
+                }
+            }
+            return;
+        }
+        Location scorerAt = scorerId != null ? game.participantLocation(scorerId) : null;
+        if (scorerAt != null && scorerAt.getWorld() == self.getWorld()) {
+            Location scorer = scorerAt.clone();
+            double angle = bot.getSquadIndex() * 2.399963;
+            Location around = scorer.clone().add(Math.cos(angle) * 1.5, 0, Math.sin(angle) * 1.5);
+            double dist = horizontalDistance(self, around);
+            if (dist > 1.0) {
+                bot.moveToward(around, dist > 6.0 && bot.canSprint(), 1.0);
+            } else {
+                bot.holdPosition();
+                bot.faceLocation(scorer);
+                if (rnd.nextDouble() < 0.09) {
+                    bot.hop();
+                }
+                if (rnd.nextDouble() < 0.1) {
+                    bot.swingArm();
+                }
+            }
+            bot.lookAt(scorer.add(0, 1.5, 0));
+        } else {
+            bot.holdPosition();
+            if (rnd.nextDouble() < 0.06) {
+                bot.swingArm();
+            }
+            if (rnd.nextDouble() < 0.03) {
+                bot.hop();
+            }
+        }
+    }
+
+    /** Corner flag at the attacking end on the scorer's side of the pitch. */
+    private static Location celebrationCorner(Game game, MatchBot bot) {
+        Location ownGoal = goalCenter(game.getArena(), bot.getTeam());
+        Location oppGoal = goalCenter(game.getArena(), bot.getTeam().opposite());
+        PitchFrame pf = pitchFrame(game, ownGoal, oppGoal);
+        Location self = bot.getLocation();
+        Vector rel = self.toVector().subtract(pf.center().toVector());
+        rel.setY(0);
+        double side = rel.dot(pf.lateral()) >= 0.0 ? 1.0 : -1.0;
+        Location corner = pf.center().clone()
+                .add(pf.forward().clone().multiply(pf.halfLength() - 3.0))
+                .add(pf.lateral().clone().multiply(side * (pf.halfWidth() - 2.5)));
+        corner.setY(self.getY());
+        return clampToField(game.getArena(), corner);
+    }
+
+    /** The keeper has it in his hands: team-mates spread to receive, opponents drop off. */
+    private static void handleKeeperHoldsBall(Game game, MatchBot bot, Location ballLoc, Location ownGoal,
+                                              Location oppGoal, long matchTick) {
+        UUID holderId = game.getKeeperHolderId();
+        bot.squareUpTo(null, matchTick, 0);
+        bot.tickJockey(false);
+        bot.lookAt(ballLoc);
+        if (bot.getUuid().equals(holderId)) {
+            bot.holdPosition();
+            Location target = keeperDistributionTarget(game, bot);
+            if (target != null) {
+                bot.faceLocation(target);
+                bot.glance(target, 8, matchTick);
+            }
+            return;
+        }
+        MatchBot holder = game.getBot(holderId);
+        boolean ourBall = holder != null && holder.getTeam() == bot.getTeam();
+        Location self = bot.getLocation();
+        if (isGoalkeeper(bot)) {
+            Location post = keeperSpawnSpot(game, bot.getTeam());
+            if (post != null && horizontalDistance(self, post) > 0.6) {
+                bot.moveToward(post, false, 0.7);
+            } else {
+                bot.holdPosition();
+            }
+            return;
+        }
+        PitchFrame pf = pitchFrame(game, ownGoal, oppGoal);
+        Location anchor = formationAnchor(game, bot, ballLoc, ownGoal, oppGoal, pf, ourBall);
+        anchor = clampAwayFromOwnGoal(game, bot, anchor, ownGoal, oppGoal);
+        if (!ourBall) {
+            // Give the keeper his space while he has it in his hands.
+            Vector away = flatDirection(ballLoc, anchor);
+            double dist = away.length();
+            if (dist < 10.0) {
+                if (dist < 1e-3) {
+                    away = pf.forward().clone().multiply(-1.0);
+                    dist = 1.0;
+                }
+                anchor = ballLoc.clone().add(away.multiply(10.0 / dist));
+            }
+        }
+        anchor = spreadFromTeammates(game, bot, anchor);
+        anchor = clampToField(game.getArena(), anchor);
+        double dist = horizontalDistance(self, anchor);
+        bot.moveToward(anchor, sprintDecision(bot, dist, 8.0, 0.45), dist < 3.0 ? 0.7 : 1.0);
     }
 
     /**
@@ -263,6 +674,14 @@ public final class BotAi {
         boolean alert = read.alert() || rush;
 
         bot.faceLocation(ballLoc);
+        bot.lookAt(ballLoc);
+        // Shuffle across the goal square to the ball instead of turning to run.
+        bot.squareUpTo(rush ? null : ballLoc, matchTick, 3);
+        bot.setCrouched(!rush && keeperSetPosition(game, bot, ball, ballLoc, ownGoal));
+        if (!rush && tryKeeperDive(game, bot, ball, ballLoc, ownGoal, oppGoal, matchTick)) {
+            attemptGoalkeeperCatch(game, bot, ball, ballLoc, true, matchTick);
+            return;
+        }
 
         Location target = rush
                 ? interceptPoint(ball, ballLoc, self, true, bot.getAttributes().anticipation)
@@ -280,6 +699,85 @@ public final class BotAi {
         }
 
         attemptGoalkeeperCatch(game, bot, ball, ballLoc, alert, matchTick);
+    }
+
+    /** An opponent is shaping to shoot within range: knees bent, weight on the toes. */
+    private static boolean keeperSetPosition(Game game, MatchBot bot, Ball ball, Location ballLoc,
+                                             Location ownGoal) {
+        TeamSide last = ball.getLastTouchTeam();
+        if (last == null || last == bot.getTeam() || ball.getSpeed() > 0.5) {
+            return false;
+        }
+        double dist = horizontalDistance(ballLoc, ownGoal);
+        if (dist > 24.0 || dist < 3.0) {
+            return false;
+        }
+        return nearestOpponentDistance(game, bot.getTeam(), ballLoc) < 1.8;
+    }
+
+    /**
+     * A shot heading for the goal mouth but out of standing reach: the keeper
+     * reads it (or gets wrong-footed) and throws himself across the goal.
+     */
+    private static boolean tryKeeperDive(Game game, MatchBot bot, Ball ball, Location ballLoc,
+                                         Location ownGoal, Location oppGoal, long matchTick) {
+        if (ball == null || bot.isDiving() || bot.isDown()) {
+            return false;
+        }
+        Vector vel = ball.getVelocity();
+        vel.setY(0);
+        if (vel.length() < 0.5) {
+            return false;
+        }
+        Location self = bot.getLocation();
+        Vector fieldDir = flatDirection(ownGoal, oppGoal);
+        if (self == null || fieldDir.lengthSquared() < 1e-6) {
+            return false;
+        }
+        fieldDir.normalize();
+        Vector lateral = new Vector(-fieldDir.getZ(), 0, fieldDir.getX());
+        Vector rel = ballLoc.toVector().subtract(self.toVector());
+        rel.setY(0);
+        double depth = rel.dot(fieldDir);
+        double closing = -vel.dot(fieldDir);
+        if (depth < 0.3 || closing < 0.3) {
+            return false;
+        }
+        double ticks = depth / closing;
+        if (ticks > 9.0) {
+            return false;
+        }
+        double cross = rel.dot(lateral) + vel.dot(lateral) * ticks;
+        double side = Math.abs(cross);
+        if (side < 1.3 || side > 4.2) {
+            return false;
+        }
+        Location line = goalLineSpot(game.getArena(), bot.getTeam());
+        if (line != null) {
+            Vector fromLine = ballLoc.toVector().subtract(line.toVector());
+            fromLine.setY(0);
+            double toLine = fromLine.dot(fieldDir) / closing;
+            double sideAtLine = fromLine.dot(lateral) + vel.dot(lateral) * toLine;
+            double halfWidth = goalHalfWidth(game.getArena().getGoal(bot.getTeam()), line, oppGoal);
+            if (Math.abs(sideAtLine) > halfWidth + 0.6) {
+                return false;
+            }
+        }
+        double read = switch (game.getBotDifficulty(bot.getTeam())) {
+            case EASY -> 0.55;
+            case MEDIUM -> 0.8;
+            case HARD -> 0.92;
+        };
+        if (aiRoll(bot, matchTick, 0xD17E) > read) {
+            return false;
+        }
+        Location target = self.clone()
+                .add(lateral.multiply(Math.signum(cross) * Math.min(3.0, side)))
+                .add(fieldDir.multiply(0.25));
+        bot.squareUpTo(null, matchTick, 0);
+        bot.setCrouched(false);
+        bot.diveToward(target);
+        return true;
     }
 
     public static double keeperDepthFromGoalLine(Game game, TeamSide team, Location loc) {
@@ -645,7 +1143,14 @@ public final class BotAi {
             bot.setActionCooldown(5);
             return;
         }
-        game.botGoalkeeperSave(bot);
+        // Full stretch at a hard shot: palm it away rather than try to hold it.
+        boolean stretched = bot.isDiving() || dist > reach * 0.62 || lateralPenalty > 0.25;
+        if (game.getSettings().botKeeperHoldsBall && speed > 1.0 && stretched && bot.canAct()
+                && aiRoll(bot, matchTick, 0xA77) < 0.55) {
+            game.botGoalkeeperParry(bot);
+        } else {
+            game.botGoalkeeperSave(bot);
+        }
         bot.setActionCooldown(8);
     }
 
@@ -691,6 +1196,20 @@ public final class BotAi {
         Location ownGoal = goalCenter(game.getArena(), team);
         Location oppGoal = goalCenter(game.getArena(), team.opposite());
         return keeperClearanceFallback(game, team, from, ownGoal, oppGoal);
+    }
+
+    /** Free kick taken by a bot: the best open team-mate, or null to hit it long. */
+    public static Location restartPassTarget(Game game, MatchBot taker, Location ballLoc) {
+        if (game == null || taker == null || ballLoc == null) {
+            return null;
+        }
+        Location ownGoal = goalCenter(game.getArena(), taker.getTeam());
+        Location oppGoal = goalCenter(game.getArena(), taker.getTeam().opposite());
+        PassOption pass = findBestPass(game, taker, ballLoc, oppGoal, ownGoal);
+        if (pass == null || !isSafeBallPath(game, ballLoc, pass.target(), PATH_INSET)) {
+            return null;
+        }
+        return pass.target();
     }
 
     /** Upfield punch when the keeper smothers a loose ball off his line. */
@@ -868,7 +1387,353 @@ public final class BotAi {
     // On-ball: attacking
     // ==================================================================
 
-    private static void handleAttack(Game game, MatchBot bot, Location ballLoc, Location oppGoal,
+    /**
+     * The ball is ours and this player is on it. With close control he first
+     * gets it under control, then picks shot, pass or carry the way a real
+     * player does: settle, look up, and only then play it — unless the pressure
+     * forces a quick release.
+     */
+    private static void handleAttack(Game game, MatchBot bot, Ball ball, Location ballLoc, Location oppGoal,
+                                     Location ownGoal, double distToBall, long matchTick, boolean canKick) {
+        SoccerSettings settings = game.getSettings();
+        if (!settings.botCloseControl) {
+            legacyAttack(game, bot, ballLoc, oppGoal, ownGoal, distToBall, matchTick, canKick);
+            return;
+        }
+        Location self = bot.getLocation();
+        bot.lookAt(ballLoc);
+        if (distToBall > CONTROL_REACH) {
+            // Meet a rolling ball, arriving just behind it so the next touch goes forward.
+            Location meet = interceptPoint(ballLoc, ball.getVelocity(), self, true,
+                    bot.getAttributes().anticipation);
+            Vector upfield = flatDirection(meet, oppGoal);
+            if (distToBall < 4.0 && upfield.lengthSquared() > 1e-6) {
+                meet = meet.clone().subtract(upfield.normalize().multiply(0.45));
+            }
+            bot.moveToward(meet, sprintDecision(bot, distToBall, 2.5, 0.75), settings);
+            return;
+        }
+
+        if (!bot.getUuid().equals(ball.getLastTouchId())) {
+            // Slow ball arriving at his feet: take it in stride.
+            Vector intent = bot.getTouchDirection();
+            if (intent == null || intent.lengthSquared() < 1e-6) {
+                intent = flatDirection(self, oppGoal);
+            }
+            if (canKick && game.botCarry(bot, intent, Math.max(0.1, bot.getSpeed()), 6, 0.55)) {
+                bot.markControl(matchTick);
+            } else {
+                bot.moveToward(ballLoc, false, 0.7);
+            }
+            return;
+        }
+
+        double goalDist = horizontalDistance(self, oppGoal);
+        double ownDist = horizontalDistance(self, ownGoal);
+        int pressure = countOpponentsNear(game, bot.getTeam(), ballLoc, 4.5);
+        int tight = countOpponentsNear(game, bot.getTeam(), ballLoc, 2.4);
+        long held = matchTick - bot.getControlStartTick();
+        boolean settled = held >= settleTicks(game, bot, tight);
+
+        if (canKick) {
+            boolean snapShot = goalDist < 10.0 && held >= 2 && aiRoll(bot, matchTick, 0xF1A5) < 0.5;
+            if ((settled || snapShot)
+                    && tryShot(game, bot, ballLoc, oppGoal, ownGoal, goalDist, ownDist, pressure, matchTick)) {
+                return;
+            }
+            if (settled || (tight > 0 && held >= 2)) {
+                PassOption pass = findBestPass(game, bot, ballLoc, oppGoal, ownGoal);
+                if (pass != null
+                        && wantsToPass(game, bot, pass, ballLoc, oppGoal, goalDist, ownDist, tight, held)
+                        && isSafeBallPath(game, ballLoc, pass.target(), PATH_INSET)
+                        && !kickThreatensOwnGoal(ballLoc, pass.target(), ownGoal)) {
+                    bot.glance(pass.target(), 3, matchTick);
+                    if (readyToStrike(bot, ballLoc, pass.target())) {
+                        executePass(game, bot, pass, ballLoc, distToBall);
+                    } else {
+                        shapeToKick(bot, ballLoc, pass.target());
+                    }
+                    return;
+                }
+            }
+        }
+        carryBall(game, bot, ball, ballLoc, oppGoal, ownGoal, pressure, tight, matchTick);
+    }
+
+    /** Ticks a player needs to get the ball under control before he can look up and play it. */
+    private static int settleTicks(Game game, MatchBot bot, int tightPressure) {
+        int base = switch (game.getBotDifficulty(bot.getTeam())) {
+            case EASY -> 10;
+            case MEDIUM -> 6;
+            case HARD -> 4;
+        };
+        base += (int) Math.round((0.72 - bot.getAttributes().composure) * 8.0);
+        if (tightPressure > 0) {
+            base -= 2;
+        }
+        return Math.max(2, base);
+    }
+
+    /**
+     * Pass or keep it? Defenders and midfielders move it on quickly, wide men
+     * and strikers run with it when there is grass in front of them.
+     */
+    private static boolean wantsToPass(Game game, MatchBot bot, PassOption pass, Location ballLoc,
+                                       Location oppGoal, double goalDist, double ownDist, int tight, long held) {
+        double gain = goalDist - horizontalDistance(pass.target(), oppGoal);
+        int holdLimit = switch (bot.getRole()) {
+            case DEFENDER -> 26;
+            case WINGER -> 60;
+            case STRIKER -> 50;
+            default -> 34;
+        };
+        boolean space = spaceAhead(game, bot.getTeam(), ballLoc, oppGoal);
+        boolean want = tight > 0
+                || (pass.receiverHuman() && held >= 6)
+                || gain > 6.0
+                || (pass.style() != PassStyle.GROUND && gain > 2.0)
+                || (!space && pass.score() > 0.9)
+                || (ownDist < goalDist && !space)
+                || held >= holdLimit;
+        if (game.getBotDifficulty(bot.getTeam()) == BotDifficulty.EASY) {
+            want = want && pass.score() > 0.38;
+        }
+        return want;
+    }
+
+    /** No opponent in a forward cone in front of the ball: room to run into. */
+    private static boolean spaceAhead(Game game, TeamSide team, Location ballLoc, Location oppGoal) {
+        Vector forward = flatDirection(ballLoc, oppGoal);
+        if (forward.lengthSquared() < 1e-6) {
+            return false;
+        }
+        forward.normalize();
+        for (Location opp : opponentLocations(game, team)) {
+            Vector rel = flatDirection(ballLoc, opp);
+            double dist = rel.length();
+            if (dist < 6.5 && dist > 1e-3 && rel.dot(forward) / dist > 0.5) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Dribbling with the ball: a touch every few strides that keeps it just ahead
+     * of the feet. Under pressure the touches are short and frequent; in open
+     * grass the ball is pushed further and the player sprints onto it. A defender
+     * square in front draws a sharp cut away from him.
+     */
+    private static void carryBall(Game game, MatchBot bot, Ball ball, Location ballLoc, Location oppGoal,
+                                  Location ownGoal, int pressure, int tight, long matchTick) {
+        SoccerSettings settings = game.getSettings();
+        Location self = bot.getLocation();
+        Vector dir = bot.activeSkillMove(matchTick);
+        if (dir == null) {
+            dir = dribbleDirection(self, oppGoal, ownGoal, game, bot.getTeam());
+            Location opp = nearestOpponentLocation(game, bot.getTeam(), ballLoc);
+            if (opp != null && horizontalDistance(ballLoc, opp) < 3.2) {
+                Vector toOpp = flatDirection(self, opp);
+                double chance = 0.35 + bot.getAttributes().agility * 0.35;
+                if (toOpp.lengthSquared() > 1e-6 && toOpp.normalize().dot(dir) > 0.55
+                        && aiRoll(bot, matchTick, 0x5C11) < chance) {
+                    Vector lateral = new Vector(-dir.getZ(), 0, dir.getX());
+                    double side = lateral.dot(toOpp) > 0 ? -1.0 : 1.0;
+                    Vector cut = dir.clone().multiply(0.35).add(lateral.multiply(side)).normalize();
+                    dir = keepDirectionInPlay(game, self, cut);
+                    bot.startSkillMove(dir, matchTick, 8);
+                }
+            }
+        }
+        bot.setTouchDirection(dir);
+
+        boolean close = tight > 0;
+        boolean open = pressure == 0;
+        boolean sprint = open && sprintDecision(bot, horizontalDistance(self, oppGoal), 10.0, 0.55);
+        double pace = close ? 0.62 : (open ? 1.0 : 0.82);
+        int touchTicks = close ? 5 : (sprint ? 11 : 8);
+        double lead = close ? 0.55 : (sprint ? 1.25 : 0.9);
+        double nominal = (sprint ? BotMovement.configuredSprintSpeed(settings)
+                : BotMovement.configuredWalkSpeed(settings)) * pace * 0.9;
+        double runSpeed = Math.max(0.08, Math.max(bot.getSpeed(), nominal));
+
+        Vector rel = flatDirection(self, ballLoc);
+        double ahead = rel.dot(dir);
+        double across = Math.abs(rel.getX() * -dir.getZ() + rel.getZ() * dir.getX());
+        long since = matchTick - bot.getLastCarryTick();
+        boolean due = since >= touchTicks || ahead < 0.35 || across > 0.85 || ball.getSpeed() < 0.05;
+        if (due && bot.canAct()) {
+            game.botCarry(bot, dir, runSpeed, touchTicks, lead);
+        }
+        Location runTo = ballLoc.clone().add(dir.clone().multiply(1.6));
+        runTo.setY(self.getY());
+        bot.moveToward(runTo, sprint, pace);
+    }
+
+    /** True when the ball sits where a kick toward {@code target} can be struck cleanly. */
+    private static boolean readyToStrike(MatchBot bot, Location ballLoc, Location target) {
+        Location self = bot.getLocation();
+        if (self == null || ballLoc == null || target == null) {
+            return true;
+        }
+        Vector toBall = flatDirection(self, ballLoc);
+        if (toBall.length() < 1.15) {
+            return true;
+        }
+        Vector toTarget = flatDirection(self, target);
+        if (toTarget.lengthSquared() < 1e-6) {
+            return true;
+        }
+        return toBall.normalize().dot(toTarget.normalize()) > 0.3;
+    }
+
+    /** Step round the ball to open the body up for a kick toward {@code target}. */
+    private static void shapeToKick(MatchBot bot, Location ballLoc, Location target) {
+        Vector dir = flatDirection(ballLoc, target);
+        if (dir.lengthSquared() < 1e-6) {
+            return;
+        }
+        Location spot = ballLoc.clone().subtract(dir.normalize().multiply(0.8));
+        spot.setY(bot.getLocation().getY());
+        bot.moveToward(spot, false, 0.7);
+    }
+
+    /**
+     * Shoot when it is on: in range, with a real angle at goal and no defender
+     * right in the line. Long shots depend on the player's appetite for them.
+     */
+    private static boolean tryShot(Game game, MatchBot bot, Location ballLoc, Location oppGoal, Location ownGoal,
+                                   double goalDist, double ownDist, int pressure, long matchTick) {
+        Location self = bot.getLocation();
+        if (ownDist <= goalDist || !avoidsOwnGoal(self, oppGoal, ownGoal)) {
+            return false;
+        }
+        BotDifficulty difficulty = game.getBotDifficulty(bot.getTeam());
+        double range = switch (difficulty) {
+            case EASY -> 14.0;
+            case MEDIUM -> 22.0;
+            case HARD -> 30.0;
+        };
+        if (bot.getRole() == BotRole.DEFENDER) {
+            range = Math.min(range, 16.0);
+        }
+        if (goalDist > range) {
+            return false;
+        }
+        double minOpening = switch (difficulty) {
+            case EASY -> 14.0;
+            case MEDIUM -> 9.0;
+            case HARD -> 7.0;
+        };
+        if (goalOpeningDegrees(game, bot.getTeam().opposite(), ballLoc) < minOpening) {
+            return false;
+        }
+        if (goalDist > 16.0) {
+            if (pressure >= 2) {
+                return false;
+            }
+            double appetite = switch (bot.getRole()) {
+                case STRIKER -> 0.6;
+                case WINGER, PLAYMAKER -> 0.45;
+                case DEFENDER -> 0.12;
+                default -> 0.32;
+            };
+            if (aiRoll(bot, matchTick, 0x5407) > appetite) {
+                return false;
+            }
+        }
+        Location aim = shotAimPoint(game, bot, ballLoc, oppGoal);
+        if (aim == null || !aimsAtOpponentGoal(self, aim, ownGoal, oppGoal)
+                || !isSafeBallPath(game, ballLoc, aim, PATH_INSET * 0.75)) {
+            return false;
+        }
+        if (goalDist > 7.0 && shotBlocked(game, bot.getTeam(), ballLoc, aim)) {
+            return false;
+        }
+        if (!readyToStrike(bot, ballLoc, aim)) {
+            shapeToKick(bot, ballLoc, aim);
+            return true;
+        }
+        bot.faceLocation(aim);
+        shootAtGoal(game, bot, oppGoal, ownGoal, goalDist, aim);
+        bot.setActionCooldown(12);
+        return true;
+    }
+
+    /** Angle (degrees) the goal mouth subtends from {@code from}: tiny from the byline. */
+    private static double goalOpeningDegrees(Game game, TeamSide defending, Location from) {
+        Cuboid goal = game.getArena().getGoal(defending);
+        if (goal == null || from == null) {
+            return 30.0;
+        }
+        boolean useX = goal.getSizeX() >= goal.getSizeZ();
+        double cx = (goal.getMinX() + goal.getMaxX()) * 0.5;
+        double cz = (goal.getMinZ() + goal.getMaxZ()) * 0.5;
+        Vector a = useX ? new Vector(goal.getMinX() - from.getX(), 0, cz - from.getZ())
+                : new Vector(cx - from.getX(), 0, goal.getMinZ() - from.getZ());
+        Vector b = useX ? new Vector(goal.getMaxX() - from.getX(), 0, cz - from.getZ())
+                : new Vector(cx - from.getX(), 0, goal.getMaxZ() - from.getZ());
+        if (a.lengthSquared() < 1e-6 || b.lengthSquared() < 1e-6) {
+            return 90.0;
+        }
+        double dot = clamp(a.normalize().dot(b.normalize()), -1.0, 1.0);
+        return Math.toDegrees(Math.acos(dot));
+    }
+
+    /** An outfield opponent standing right in the line of the shot. */
+    private static boolean shotBlocked(Game game, TeamSide team, Location ballLoc, Location aim) {
+        Vector line = flatDirection(ballLoc, aim);
+        double len = line.length();
+        if (len < 1e-3) {
+            return false;
+        }
+        line.multiply(1.0 / len);
+        for (MatchBot opp : game.getBots()) {
+            if (opp.getTeam() == team || isGoalkeeper(opp) || opp.getLocation() == null) {
+                continue;
+            }
+            if (inShotLane(ballLoc, line, len, opp.getLocation())) {
+                return true;
+            }
+        }
+        for (SoccerPlayer sp : game.getHumanParticipants()) {
+            Player player = sp.getBukkitPlayer();
+            if (!sp.isBot() && sp.getTeam() == team.opposite() && player != null && player.isOnline()
+                    && inShotLane(ballLoc, line, len, player.getLocation())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean inShotLane(Location ballLoc, Vector unitLine, double len, Location body) {
+        Vector rel = flatDirection(ballLoc, body);
+        double along = rel.dot(unitLine);
+        if (along < 1.5 || along > Math.min(9.0, len - 1.0)) {
+            return false;
+        }
+        double off = Math.abs(rel.getX() * -unitLine.getZ() + rel.getZ() * unitLine.getX());
+        return off < 0.9;
+    }
+
+    /** Where a first-time finish should go, or null when there is no sensible shot. */
+    public static Location finishingAim(Game game, MatchBot bot, Location ballLoc) {
+        if (game == null || bot == null || ballLoc == null || bot.getLocation() == null) {
+            return null;
+        }
+        Location ownGoal = goalCenter(game.getArena(), bot.getTeam());
+        Location oppGoal = goalCenter(game.getArena(), bot.getTeam().opposite());
+        if (goalOpeningDegrees(game, bot.getTeam().opposite(), ballLoc) < 9.0) {
+            return null;
+        }
+        Location aim = shotAimPoint(game, bot, ballLoc, oppGoal);
+        if (aim == null || !aimsAtOpponentGoal(ballLoc, aim, ownGoal, oppGoal)) {
+            return null;
+        }
+        return aim;
+    }
+
+    private static void legacyAttack(Game game, MatchBot bot, Location ballLoc, Location oppGoal,
                                      Location ownGoal, double distToBall, long matchTick,
                                      boolean canKick) {
         bot.faceLocation(oppGoal);
@@ -1022,6 +1887,9 @@ public final class BotAi {
                 continue;
             }
             Location loc = player.getLocation();
+            if (receiverOffside(game, bot, loc, ballLoc)) {
+                continue;
+            }
             List<Location> candidates = leadCandidates(loc, player.getVelocity());
             for (int i = 0; i < candidates.size(); i++) {
                 Location candidate = candidates.get(i);
@@ -1041,7 +1909,7 @@ public final class BotAi {
                 continue;
             }
             Location loc = teammate.getLocation();
-            if (loc == null) {
+            if (loc == null || receiverOffside(game, bot, loc, ballLoc)) {
                 continue;
             }
             List<Location> candidates = leadCandidates(loc, teammate.getVelocity());
@@ -1204,6 +2072,9 @@ public final class BotAi {
 
     private static Location shotAimPoint(Game game, MatchBot bot, Location ballLoc, Location goalCenter) {
         Location aim = aimPointInGoal(game.getArena(), ballLoc, bot.getTeam().opposite(), goalCenter);
+        if (game.getSettings().botKickErrors) {
+            return placedShotAim(game, bot, ballLoc, aim);
+        }
         if (game.getBotDifficulty(bot.getTeam()) != BotDifficulty.HARD || aim == null || ballLoc == null) {
             return aim;
         }
@@ -1221,6 +2092,53 @@ public final class BotAi {
             aim.setZ(((goal.getMinZ() + goal.getMaxZ()) * 0.5) + half * side);
         }
         aim.setY(Math.max(goal.getMinY() + 0.35, Math.min(goal.getMinY() + 0.95, aim.getY())));
+        return aim;
+    }
+
+    /**
+     * Pick a corner: away from where the keeper stands, otherwise across him to
+     * the far post. Better finishers aim tighter to the post (and miss more
+     * often when they get it wrong, through the kick error model).
+     */
+    private static Location placedShotAim(Game game, MatchBot bot, Location ballLoc, Location aim) {
+        Cuboid goal = game.getArena().getGoal(bot.getTeam().opposite());
+        if (goal == null || aim == null || ballLoc == null) {
+            return aim;
+        }
+        boolean useX = goal.getSizeX() >= goal.getSizeZ();
+        double mid = useX ? (goal.getMinX() + goal.getMaxX()) * 0.5 : (goal.getMinZ() + goal.getMaxZ()) * 0.5;
+        double half = Math.max(0.6, (useX ? goal.getSizeX() : goal.getSizeZ()) * 0.5);
+        double shooterOffset = (useX ? ballLoc.getX() : ballLoc.getZ()) - mid;
+
+        double side = shooterOffset > 0.3 ? -1.0 : (shooterOffset < -0.3 ? 1.0 : 0.0);
+        for (MatchBot keeper : game.getBots()) {
+            if (keeper.getTeam() == bot.getTeam() || !isGoalkeeper(keeper) || keeper.getLocation() == null) {
+                continue;
+            }
+            double keeperOffset = (useX ? keeper.getLocation().getX() : keeper.getLocation().getZ()) - mid;
+            if (Math.abs(keeperOffset) > 0.25) {
+                side = keeperOffset > 0 ? -1.0 : 1.0;
+            }
+        }
+        if (side == 0.0) {
+            side = aiRoll(bot, game.getMatchTick(), 0xC001) < 0.5 ? -1.0 : 1.0;
+        }
+        double tightness = switch (game.getBotDifficulty(bot.getTeam())) {
+            case EASY -> 0.45;
+            case MEDIUM -> 0.6;
+            case HARD -> 0.72;
+        };
+        double target = mid + side * half * tightness;
+        if (useX) {
+            aim.setX(target);
+        } else {
+            aim.setZ(target);
+        }
+        double low = goal.getMinY() + 0.3;
+        double high = Math.max(low, Math.min(goal.getMaxY() - 0.6, goal.getMinY() + 1.6));
+        boolean goHigh = game.getBotDifficulty(bot.getTeam()) == BotDifficulty.HARD
+                && aiRoll(bot, game.getMatchTick(), 0xC0FF) < 0.3;
+        aim.setY(goHigh ? high : low + 0.3);
         return aim;
     }
 
@@ -1320,7 +2238,103 @@ public final class BotAi {
     // On-ball: pressing / defending
     // ==================================================================
 
+    /**
+     * Defending the man on the ball: get goal-side, close him down, then jockey —
+     * side-on, matching his steps a couple of blocks off — and only commit to the
+     * tackle when he lets it run, stands still too long or gets near goal. A man
+     * who has got past is chased down, with a slide as the last resort.
+     */
     private static void handlePress(Game game, MatchBot bot, Ball ball, Location ballLoc,
+                                    Location oppGoal, double distToBall, long matchTick,
+                                    boolean canKick) {
+        SoccerSettings settings = game.getSettings();
+        if (!settings.botTackleDuels) {
+            legacyPress(game, bot, ball, ballLoc, oppGoal, distToBall, matchTick, canKick);
+            return;
+        }
+        Location self = bot.getLocation();
+        Location ownGoal = goalCenter(game.getArena(), bot.getTeam());
+        UUID carrierId = ball.getLastTouchId();
+        Location carrierAt = carrierId != null ? game.participantLocation(carrierId) : null;
+        Location carrier = carrierAt != null && carrierAt.getWorld() == ballLoc.getWorld() ? carrierAt.clone() : null;
+        boolean carried = carrier != null && horizontalDistance(carrier, ballLoc) < 1.9 && ball.getSpeed() < 0.6;
+
+        if (!carried) {
+            // Loose or travelling: go and win it — contact takes it off the floor.
+            bot.squareUpTo(null, matchTick, 0);
+            bot.tickJockey(false);
+            Location meet = interceptPoint(ballLoc, ball.getVelocity(), self, true,
+                    bot.getAttributes().anticipation);
+            bot.moveToward(meet, sprintDecision(bot, distToBall, 1.5, 0.9), settings);
+            return;
+        }
+
+        Vector toGoal = flatDirection(ballLoc, ownGoal);
+        if (toGoal.lengthSquared() < 1e-6) {
+            toGoal = flatDirection(oppGoal, ownGoal);
+        }
+        toGoal.normalize();
+        Location jockeySpot = ballLoc.clone().add(toGoal.clone().multiply(JOCKEY_DISTANCE));
+        jockeySpot.setY(self.getY());
+        double toSpot = horizontalDistance(self, jockeySpot);
+        boolean goalSide = horizontalDistance(self, ownGoal) < horizontalDistance(carrier, ownGoal) - 0.4;
+        MatchBot carrierBot = game.getBot(carrierId);
+        boolean carrierStaggered = carrierBot != null && carrierBot.isStaggered(matchTick);
+
+        if (!goalSide) {
+            bot.squareUpTo(null, matchTick, 0);
+            bot.tickJockey(false);
+            if (canKick && distToBall < 4.8 && shouldSlideTackle(game, bot, ball, ballLoc, distToBall, matchTick)) {
+                bot.faceLocation(ballLoc);
+                if (bot.slideTackleToward(ballLoc, matchTick)) {
+                    game.onBotSlideTackle(bot);
+                    Location clearTarget = safeClearanceTarget(game, ballLoc, oppGoal, ownGoal);
+                    bot.faceLocation(clearTarget);
+                    game.botKick(bot, BallKickEvent.KickType.TACKLE, 0);
+                    bot.setActionCooldown(16);
+                    return;
+                }
+            }
+            if (canKick && distToBall <= 1.9 && bot.canDuel(matchTick)
+                    && aiRoll(bot, matchTick, 0x7B1D) < 0.3 + bot.getAttributes().aggression * 0.3) {
+                game.botStandingTackle(bot, flatDirection(ballLoc, safeClearanceTarget(game, ballLoc, oppGoal, ownGoal)));
+                bot.setActionCooldown(4);
+                return;
+            }
+            // Recovery run: back between the man and the goal.
+            bot.moveToward(jockeySpot, sprintDecision(bot, toSpot, 1.2, 0.95), settings);
+            return;
+        }
+
+        if (distToBall > 3.4) {
+            // Close him down, easing up on arrival so he can't just knock it past.
+            bot.squareUpTo(null, matchTick, 0);
+            bot.tickJockey(false);
+            double urgency = 0.75 + bot.getAttributes().aggression * 0.2;
+            bot.moveToward(jockeySpot, sprintDecision(bot, toSpot, 3.0, urgency), toSpot < 3.5 ? 0.8 : 1.0);
+            return;
+        }
+
+        bot.tickJockey(true);
+        bot.squareUpTo(ballLoc, matchTick, 3);
+        bot.moveToward(jockeySpot, toSpot > 1.8, toSpot > 1.2 ? 0.95 : 0.62);
+
+        double looseness = horizontalDistance(carrier, ballLoc);
+        double danger = clamp(1.0 - horizontalDistance(ballLoc, ownGoal) / 24.0, 0.0, 1.0);
+        int patience = (int) Math.round(10 + (1.0 - bot.getAttributes().aggression) * 30 - danger * 12);
+        boolean standingStill = carrierBot != null && carrierBot.getSpeed() < 0.05
+                && bot.jockeyTicks() > patience / 2;
+        boolean moment = looseness > 1.05 || carrierStaggered || standingStill
+                || bot.jockeyTicks() > Math.max(4, patience);
+        if (canKick && moment && distToBall <= 2.0 && bot.canDuel(matchTick)) {
+            Vector poke = flatDirection(ballLoc, safeClearanceTarget(game, ballLoc, oppGoal, ownGoal));
+            game.botStandingTackle(bot, poke);
+            bot.tickJockey(false);
+            bot.setActionCooldown(4);
+        }
+    }
+
+    private static void legacyPress(Game game, MatchBot bot, Ball ball, Location ballLoc,
                                     Location oppGoal, double distToBall, long matchTick,
                                     boolean canKick) {
         Location ownGoal = goalCenter(game.getArena(), bot.getTeam());
@@ -1392,32 +2406,223 @@ public final class BotAi {
     // ==================================================================
 
     private static void handleOffBall(Game game, MatchBot bot, Location ballLoc, Location ownGoal,
-                                      Location oppGoal, TeamSide team, TeamSide possession, UUID chaserId) {
+                                      Location oppGoal, TeamSide team, TeamSide possession, UUID chaserId,
+                                      long matchTick) {
         boolean attacking = possession != team.opposite();
         PitchFrame pf = pitchFrame(game, ownGoal, oppGoal);
         int rank = supportRank(game, bot, ballLoc, chaserId);
+        boolean runner = bot.getRole() == BotRole.STRIKER || bot.getRole() == BotRole.WINGER;
+        boolean runningInBehind = false;
 
-        Location anchor;
-        if (attacking && rank >= 0 && rank < 3) {
+        Location anchor = null;
+        if (attacking && runner && bot.isMakingRun(matchTick)) {
+            // Timed run in behind: go now, the pass is coming.
+            anchor = runInBehindPoint(game, bot, ballLoc, ownGoal, oppGoal, pf);
+            runningInBehind = true;
+        } else if (attacking && rank >= 0 && rank < 3) {
             // Closest spare players break shape to offer passing angles.
             anchor = supportPoint(game, bot, ballLoc, ownGoal, oppGoal, pf);
-        } else if (attacking && (bot.getRole() == BotRole.STRIKER || bot.getRole() == BotRole.WINGER)) {
+        } else if (attacking && runner) {
             anchor = runInBehindPoint(game, bot, ballLoc, ownGoal, oppGoal, pf);
+            maybeTimeRun(game, bot, ballLoc, matchTick);
         } else if (!attacking && rank == 0 && bot.getRole() == BotRole.DEFENDER) {
             anchor = coverPoint(game, bot, ballLoc, ownGoal, oppGoal, pf);
-        } else {
+        } else if (!attacking && game.getSettings().botMarking) {
+            anchor = markingPoint(game, bot, ballLoc, ownGoal, oppGoal, chaserId, pf);
+        }
+        if (anchor == null) {
             anchor = formationAnchor(game, bot, ballLoc, ownGoal, oppGoal, pf, attacking);
         }
 
         anchor = clampAwayFromOwnGoal(game, bot, anchor, ownGoal, oppGoal);
         anchor = spreadFromTeammates(game, bot, anchor);
-        anchor = spreadFromOpponents(game, bot, anchor);
+        if (attacking) {
+            // Get free of markers; defenders stay tight to their man instead.
+            anchor = spreadFromOpponents(game, bot, anchor);
+            if (!runningInBehind) {
+                anchor = holdOnside(game, bot, anchor, ballLoc);
+            }
+        }
         anchor = clampToField(game.getArena(), anchor);
 
         double distToAnchor = horizontalDistance(bot.getLocation(), anchor);
-        double runUrgency = distToAnchor > 10.0 ? 0.95 : 0.65 + bot.getAttributes().workRate * 0.25;
+        double runUrgency = runningInBehind ? 1.0
+                : distToAnchor > 10.0 ? 0.95 : 0.65 + bot.getAttributes().workRate * 0.25;
         bot.moveToward(anchor, sprintDecision(bot, distToAnchor, 2.0, runUrgency), game.getSettings());
         bot.faceLocation(ballLoc);
+    }
+
+    /**
+     * Strikers wait on the shoulder of the last defender and go the moment a
+     * team-mate has the ball under control and his head up.
+     */
+    private static void maybeTimeRun(Game game, MatchBot bot, Location ballLoc, long matchTick) {
+        Ball ball = game.getBall();
+        if (ball == null || !bot.canStartRun(matchTick) || ball.getLastTouchTeam() != bot.getTeam()) {
+            return;
+        }
+        UUID carrierId = ball.getLastTouchId();
+        if (carrierId == null || carrierId.equals(bot.getUuid())) {
+            return;
+        }
+        Location carrier = game.participantLocation(carrierId);
+        if (carrier == null || horizontalDistance(carrier, ballLoc) > 1.8) {
+            return;
+        }
+        double dist = horizontalDistance(bot.getLocation(), ballLoc);
+        if (dist < 6.0 || dist > 30.0) {
+            return;
+        }
+        double chance = 0.12 + bot.getAttributes().anticipation * 0.18 + bot.getAttributes().workRate * 0.05;
+        if (aiRoll(bot, matchTick, 0x2A11) < chance) {
+            bot.startRun(matchTick, 24 + (int) Math.round(bot.getAttributes().anticipation * 10.0));
+        }
+    }
+
+    /** How far up the pitch an attacker of {@code attacking} may stand without being offside. */
+    private static double offsideLineProgress(Game game, OffsideChecker.PitchAxis axis, TeamSide attacking,
+                                              Location ballLoc) {
+        List<Double> defenders = new ArrayList<>();
+        for (Location loc : opponentLocations(game, attacking)) {
+            defenders.add(axis.attackProgress(attacking, loc));
+        }
+        double line = OffsideChecker.secondLastOpponentProgress(defenders);
+        double ball = axis.attackProgress(attacking, ballLoc);
+        Cuboid field = game.getArena().getField();
+        double halfway = field != null ? axis.attackProgress(attacking, field.getCenter()) : ball;
+        return Math.max(line, Math.max(ball, halfway));
+    }
+
+    private static boolean offsideAware(Game game) {
+        SoccerSettings settings = game.getSettings();
+        return settings.offsideEnabled && settings.botOffsideAware && game.getPitchAxis() != null;
+    }
+
+    /** Pull an attacking position back onside, onto the shoulder of the last defender. */
+    private static Location holdOnside(Game game, MatchBot bot, Location anchor, Location ballLoc) {
+        if (anchor == null || !offsideAware(game)) {
+            return anchor;
+        }
+        OffsideChecker.PitchAxis axis = game.getPitchAxis();
+        double line = offsideLineProgress(game, axis, bot.getTeam(), ballLoc);
+        if (Double.isInfinite(line)) {
+            return anchor;
+        }
+        double margin = 0.6 + (1.0 - bot.getAttributes().anticipation) * 0.8;
+        double progress = axis.attackProgress(bot.getTeam(), anchor);
+        if (Double.isNaN(progress) || progress <= line - margin) {
+            return anchor;
+        }
+        Vector back = axis.attackDirection(bot.getTeam()).clone().multiply(progress - (line - margin));
+        return anchor.clone().subtract(back);
+    }
+
+    /** A pass to this team-mate right now would be flagged (the passer reads the line). */
+    private static boolean receiverOffside(Game game, MatchBot passer, Location receiver, Location ballLoc) {
+        if (receiver == null || !offsideAware(game)) {
+            return false;
+        }
+        OffsideChecker.PitchAxis axis = game.getPitchAxis();
+        double line = offsideLineProgress(game, axis, passer.getTeam(), ballLoc);
+        if (axis.attackProgress(passer.getTeam(), receiver) <= line) {
+            return false;
+        }
+        // Weaker sides sometimes miss the run and play it anyway.
+        return game.getBotDifficulty(passer.getTeam()) != BotDifficulty.EASY
+                || aiRoll(passer, game.getMatchTick(), 0x0FF5) > 0.35;
+    }
+
+    /**
+     * Man-marking when the other side has the ball: spare players pick up the
+     * most dangerous free attackers (greedy pairing, so nobody is marked twice
+     * and nobody gets dragged across the pitch) and stand goal-side of them,
+     * shaded toward the ball to cut out the pass.
+     */
+    private static Location markingPoint(Game game, MatchBot bot, Location ballLoc, Location ownGoal,
+                                         Location oppGoal, UUID chaserId, PitchFrame pf) {
+        TeamSide team = bot.getTeam();
+        Ball ball = game.getBall();
+        UUID carrierId = ball != null ? ball.getLastTouchId() : null;
+
+        List<Location> threats = new ArrayList<>();
+        for (MatchBot opp : game.getBots()) {
+            Location at = opp.getLocation();
+            if (opp.getTeam() == team || isGoalkeeper(opp) || at == null || opp.getUuid().equals(carrierId)) {
+                continue;
+            }
+            if (horizontalDistance(at, ownGoal) < 36.0) {
+                threats.add(at.clone());
+            }
+        }
+        for (SoccerPlayer sp : game.getHumanParticipants()) {
+            Player player = sp.getBukkitPlayer();
+            if (sp.isBot() || sp.getTeam() != team.opposite() || player == null || !player.isOnline()
+                    || sp.getUuid().equals(carrierId)) {
+                continue;
+            }
+            if (horizontalDistance(player.getLocation(), ownGoal) < 36.0) {
+                threats.add(player.getLocation());
+            }
+        }
+        if (threats.isEmpty()) {
+            return null;
+        }
+        threats.sort(Comparator.comparingDouble(loc -> horizontalDistance(loc, ownGoal)));
+
+        List<MatchBot> markers = new ArrayList<>();
+        List<Location> homes = new ArrayList<>();
+        for (MatchBot mate : game.getBots()) {
+            if (mate.getTeam() != team || isGoalkeeper(mate) || mate.getUuid().equals(chaserId)
+                    || mate.getLocation() == null) {
+                continue;
+            }
+            markers.add(mate);
+            homes.add(formationAnchor(game, mate, ballLoc, ownGoal, oppGoal, pf, false));
+        }
+        boolean[] taken = new boolean[markers.size()];
+        for (Location threat : threats) {
+            int bestIdx = -1;
+            double best = 14.0;
+            for (int i = 0; i < markers.size(); i++) {
+                if (taken[i]) {
+                    continue;
+                }
+                double cost = horizontalDistance(homes.get(i), threat) * markWeight(markers.get(i).getRole());
+                if (cost < best) {
+                    best = cost;
+                    bestIdx = i;
+                }
+            }
+            if (bestIdx < 0) {
+                continue;
+            }
+            taken[bestIdx] = true;
+            if (markers.get(bestIdx) == bot) {
+                Vector goalSide = flatDirection(threat, ownGoal);
+                if (goalSide.lengthSquared() < 1e-6) {
+                    return null;
+                }
+                Location spot = threat.clone().add(goalSide.normalize().multiply(MARK_DISTANCE));
+                Vector ballSide = flatDirection(threat, ballLoc);
+                if (ballSide.lengthSquared() > 1e-6) {
+                    spot.add(ballSide.normalize().multiply(0.7));
+                }
+                spot.setY(ballLoc.getY());
+                return spot;
+            }
+        }
+        return null;
+    }
+
+    /** Lower = more willing to man-mark (defenders track runners, strikers rarely do). */
+    private static double markWeight(BotRole role) {
+        return switch (role) {
+            case DEFENDER -> 0.8;
+            case MIDFIELDER, PLAYMAKER -> 1.0;
+            case WINGER -> 1.3;
+            case STRIKER -> 1.8;
+            default -> 1.1;
+        };
     }
 
     /**
@@ -1813,10 +3018,18 @@ public final class BotAi {
 
     private static Location interceptPoint(Ball ball, Location ballLoc, Location self, boolean chaser,
                                            double anticipation) {
-        if (ball == null || ballLoc == null || self == null) {
+        if (ball == null) {
             return ballLoc;
         }
-        Vector ballVel = ball.getVelocity();
+        return interceptPoint(ballLoc, ball.getVelocity(), self, chaser, anticipation);
+    }
+
+    private static Location interceptPoint(Location ballLoc, Vector velocity, Location self, boolean chaser,
+                                           double anticipation) {
+        if (ballLoc == null || self == null || velocity == null) {
+            return ballLoc;
+        }
+        Vector ballVel = velocity.clone();
         ballVel.setY(0);
         double speed = ballVel.length();
         if (speed < 0.08 || !chaser) {

@@ -55,6 +55,16 @@ public final class SoccerSettings {
     /** When true, Citizens NPCs pathfind; when false, plugin physics moves them (recommended). */
     public boolean botCitizensPathfind;
     public java.util.List<String> botSkinNames;
+    public boolean botReactionDelay;
+    public boolean botFirstTouch;
+    public boolean botTackleDuels;
+    public boolean botKeeperHoldsBall;
+    public boolean botCelebrations;
+    public boolean kickoffRules;
+    public boolean botKickErrors;
+    public boolean botCloseControl;
+    public boolean botOffsideAware;
+    public boolean botMarking;
     public int mercyRuleLead;
     public boolean throwInEnabled;
     public boolean throwInAutoTaker;
@@ -89,6 +99,15 @@ public final class SoccerSettings {
     public int networkPendingJoinTimeoutSeconds;
     public boolean networkReturnToLobbyOnLeave;
     public boolean networkReturnToLobbyOnMatchEnd;
+
+    // pre-match show
+    public boolean introEnabled;
+    public double introDurationScale;
+    public boolean introSkipBySneak;
+    public double introSkipVoteRatio;
+    public boolean introIncludeSpectators;
+    public boolean introLineupChat;
+    public int introCameraSmoothing;
 
     // referee
     public boolean refereeEnabled;
@@ -266,6 +285,23 @@ public final class SoccerSettings {
             botSkinNames = java.util.List.of(
                     "Notch", "jeb_", "Dinnerbone", "Grumm", "MHF_Steve");
         }
+        botReactionDelay = c.getBoolean("bots.realism.reaction-delay", true);
+        botFirstTouch = c.getBoolean("bots.realism.first-touch", true);
+        botTackleDuels = c.getBoolean("bots.realism.tackle-duels", true);
+        botKeeperHoldsBall = c.getBoolean("bots.realism.keeper-holds-ball", true);
+        botCelebrations = c.getBoolean("bots.realism.celebrations", true);
+        kickoffRules = c.getBoolean("bots.realism.kickoff-rules", true);
+        botKickErrors = c.getBoolean("bots.realism.kick-errors", true);
+        botCloseControl = c.getBoolean("bots.realism.close-control", true);
+        botOffsideAware = c.getBoolean("bots.realism.offside-aware", true);
+        botMarking = c.getBoolean("bots.realism.marking", true);
+        introEnabled = c.getBoolean("intro.enabled", true);
+        introDurationScale = Math.max(0.3, Math.min(3.0, c.getDouble("intro.duration-scale", 1.0)));
+        introSkipBySneak = c.getBoolean("intro.skip-by-sneak", true);
+        introSkipVoteRatio = Math.max(0.0, Math.min(1.0, c.getDouble("intro.skip-vote-ratio", 0.5)));
+        introIncludeSpectators = c.getBoolean("intro.include-spectators", true);
+        introLineupChat = c.getBoolean("intro.lineup-chat", true);
+        introCameraSmoothing = Math.max(1, Math.min(6, c.getInt("intro.camera-smoothing-ticks", 3)));
         mercyRuleLead = c.getInt("game.mercy-rule-lead", 0);
         throwInEnabled = c.getBoolean("game.throw-in-enabled", true);
         throwInAutoTaker = c.getBoolean("game.throw-in-auto-taker", true);

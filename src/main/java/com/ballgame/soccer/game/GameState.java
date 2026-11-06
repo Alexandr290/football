@@ -8,6 +8,8 @@ public enum GameState {
     WAITING("Waiting"),
     /** Lobby countdown before teleporting players in. */
     COUNTDOWN("Starting"),
+    /** Broadcast-style pre-match show (walkout, line-ups) before the first kickoff. */
+    INTRO("Pre-match"),
     /** Kickoff countdown (ball frozen). */
     KICKOFF("Kick Off"),
     /** Active play. */
@@ -48,7 +50,7 @@ public enum GameState {
     /** Stadium crowd audio runs through these phases (kickoff → full time). */
     public boolean hasStadiumCrowd() {
         return switch (this) {
-            case KICKOFF, PLAYING, THROW_IN, OFFSIDE, HALFTIME, EXTRA_TIME, PENALTIES,
+            case INTRO, KICKOFF, PLAYING, THROW_IN, OFFSIDE, HALFTIME, EXTRA_TIME, PENALTIES,
                     REPLAY, VAR_REVIEW, REFEREE_STOP -> true;
             default -> false;
         };

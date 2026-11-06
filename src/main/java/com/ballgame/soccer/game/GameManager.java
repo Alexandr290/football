@@ -789,6 +789,40 @@ public final class GameManager {
         return game;
     }
 
+    /**
+     * Bots-only friendly on a free arena: full squads at the given levels, the
+     * usual walk-out and kickoff, and everyone else watching from the stands.
+     *
+     * @return the match, or null when bots are disabled, the arena is not
+     *         playable/busy, or squads could not be filled
+     */
+    public Game startExhibitionBotMatch(Arena arena, BotDifficulty red, BotDifficulty blue) {
+        if (!plugin.settings().botsEnabled || arena == null || !arena.isPlayable()) {
+            return null;
+        }
+        Game existing = gamesByArena.get(key(arena));
+        if (existing != null && !existing.isEnded()) {
+            return null;
+        }
+        Game game = new Game(plugin, arena);
+        gamesByArena.put(key(arena), game);
+        game.setBotOnlyMatch(true);
+        game.setBotDifficulty(TeamSide.RED, red != null ? red : BotDifficulty.MEDIUM);
+        game.setBotDifficulty(TeamSide.BLUE, blue != null ? blue : BotDifficulty.MEDIUM);
+        game.fillFullSquadsSilently();
+        if (game.getTeamCount(TeamSide.RED) < plugin.settings().maxPlayersPerTeam
+                || game.getTeamCount(TeamSide.BLUE) < plugin.settings().maxPlayersPerTeam) {
+            game.removeAllBots();
+            gamesByArena.remove(key(arena));
+            return null;
+        }
+        game.deployFormationLineup();
+        game.refreshBotKitVisuals();
+        game.tryStartBotOnlyLobby();
+        syncServerViewers();
+        return game;
+    }
+
     /** Teleports every online player not in a match to the arena spectator spot. */
     public void teleportServerToStadium(Arena arena, Game watchGame) {
         Location spot = resolveStadiumSpot(arena);

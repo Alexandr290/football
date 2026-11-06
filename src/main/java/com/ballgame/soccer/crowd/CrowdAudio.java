@@ -99,6 +99,27 @@ public final class CrowdAudio {
         playNpcShout(VanillaNpcCrowd.VOL_MIDFIELD * 0.85f);
     }
 
+    /** Teams appear from the tunnel — the whole stadium rises. */
+    public void onTeamsWalkOut() {
+        if (!settings.crowdEnabled) {
+            return;
+        }
+        intensity = Math.max(intensity, 0.9);
+        playNpcShout(VanillaNpcCrowd.VOL_ATTACK);
+        playCrowd(CrowdSound.GOAL_CHEER, 0.42f, 0.94f);
+        playCrowd(CrowdSound.AMBIENCE_HIGH, 0.65f, 1.0f);
+    }
+
+    /** Line-up and handshakes — warm applause around the ground. */
+    public void onLineUp() {
+        if (!settings.crowdEnabled) {
+            return;
+        }
+        intensity = Math.max(intensity, 0.72);
+        playCrowd(CrowdSound.APPLAUSE, 0.6f, 1.0f);
+        playCrowd(CrowdSound.CHANT, 0.4f, randomPitch(0.94f, 1.04f));
+    }
+
     public void onKickoff() {
         if (!settings.crowdEnabled) {
             return;
@@ -237,6 +258,7 @@ public final class CrowdAudio {
         }
 
         double phaseBase = switch (state) {
+            case INTRO -> 0.64;
             case KICKOFF -> 0.58;
             case HALFTIME -> 0.44;
             case PENALTIES -> 0.68;

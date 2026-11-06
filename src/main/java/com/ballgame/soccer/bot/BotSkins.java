@@ -48,6 +48,14 @@ final class BotSkins {
         return CACHE.get(username.toLowerCase());
     }
 
+    /** Seeds the cache with a skin we already hold (e.g. a live player's own profile). */
+    static void prime(String username, Skin skin) {
+        if (username == null || skin == null || skin.value() == null) {
+            return;
+        }
+        CACHE.put(username.toLowerCase(), skin);
+    }
+
     /**
      * Resolves the skin for {@code username} asynchronously. If it is already
      * cached the callback fires immediately on the calling thread; otherwise the

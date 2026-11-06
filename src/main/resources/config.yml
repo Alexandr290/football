@@ -150,6 +150,35 @@ bots:
     - "Dinnerbone"
     - "Grumm"
     - "MHF_Steve"
+  # Human-like behaviour. Every toggle can be switched off to get the old,
+  # "perfect" machine-like bots back.
+  realism:
+    # Bots react to where the ball WAS a few ticks ago (human reaction time).
+    reaction-delay: true
+    # First touch can be heavy: hard passes bounce off, tired players miscontrol.
+    first-touch: true
+    # Defenders get goal-side and jockey, then pick their moment to tackle.
+    # Tackles are duels decided by attributes; the loser stumbles for a moment.
+    tackle-duels: true
+    # Passes and shots are not laser-perfect: pressure, fatigue and kicking
+    # across the body add error. Shots are placed away from the keeper.
+    kick-errors: true
+    # Bots dribble with real touches (the ball leaves the feet between touches),
+    # settle the ball before playing it, head high balls and finish first time.
+    close-control: true
+    # Strikers wait on the last defender's shoulder and time their runs,
+    # passers avoid offside team-mates, and bots are flagged offside themselves.
+    offside-aware: true
+    # When defending, spare players man-mark the most dangerous free attackers.
+    marking: true
+    # Keepers dive, parry hard shots, catch and hold the ball (not back-passes),
+    # then roll, throw or kick it out.
+    keeper-holds-ball: true
+    # Scorers celebrate at the corner flag, team-mates join in.
+    celebrations: true
+    # Real kickoff: coin toss, alternate halves, conceding team kicks off,
+    # opponents stay outside the centre circle.
+    kickoff-rules: true
 
 # ---------------------------------------------------------------------
 # Match referee — center official + two assistant referees (linesmen).
@@ -180,6 +209,27 @@ referee:
   auto-referee-time-waste-seconds: 12
   auto-referee-hold-contest-seconds: 4
   auto-referee-dissent-window-ticks: 80
+
+# ---------------------------------------------------------------------
+# Pre-match show — broadcast-style intro before the first kickoff:
+# stadium flyover, tunnel walkout, line-up camera pans, kickoff shot.
+# Players watch through a smooth TV camera; their bodies are played by
+# look-alike stand-ins wearing their own skin.
+# ---------------------------------------------------------------------
+intro:
+  enabled: true
+  # Multiplies every scene length (0.5 = twice as fast, 1.0 ≈ 33 seconds).
+  duration-scale: 1.0
+  # Players can vote to skip by pressing sneak.
+  skip-by-sneak: true
+  # Share of the players in the match that must vote before the show is skipped.
+  skip-vote-ratio: 0.5
+  # Server spectators watching the stadium also see the show (sneak to leave).
+  include-spectators: true
+  # Print both starting line-ups in chat.
+  lineup-chat: true
+  # Client-side camera smoothing in ticks (1-6). Higher = silkier, more lag.
+  camera-smoothing-ticks: 3
 
 # ---------------------------------------------------------------------
 # Goal replay — TV-style cinematic playback after every goal.

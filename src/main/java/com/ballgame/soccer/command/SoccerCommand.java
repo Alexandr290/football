@@ -9,6 +9,7 @@ import com.ballgame.soccer.championship.ChampionshipType;
 import com.ballgame.soccer.championship.ChampFixture;
 import com.ballgame.soccer.championship.ChampTeam;
 import com.ballgame.soccer.crowd.CrowdPackMode;
+import com.ballgame.soccer.game.BotDifficulty;
 import com.ballgame.soccer.game.Game;
 import com.ballgame.soccer.game.TeamSide;
 import com.ballgame.soccer.stats.ChatLeaderboard;
@@ -51,7 +52,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             "create", "delete", "pos1", "pos2", "setfield", "setredgoal", "setbluegoal",
             "setballspawn", "setredspawn", "setbluespawn", "setlobby", "setspectator",
             "setredpenalty", "setbluepenalty",
-            "enable", "disable", "start", "stop", "penalty", "reload", "cleanup", "resetstats",
+            "enable", "disable", "start", "botmatch", "stop", "penalty", "reload", "cleanup", "resetstats",
             "addoutline", "clearoutlines", "listoutlines", "crowdpack",
             "cupcreate", "cupdelete", "cupstart", "cuprename", "teamrename", "cupbotmatch", "stadium", "cupfixturearena");
 
@@ -107,6 +108,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             case "enable":      return toggle(sender, args, true);
             case "disable":     return toggle(sender, args, false);
             case "start":       return adminStart(sender, args);
+            case "botmatch":    return botMatch(sender, args);
             case "stop":        return adminStop(sender, args);
             case "penalty":     return adminPenalty(sender, args);
             case "reload":      return reload(sender);
@@ -527,6 +529,45 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         game.startCountdown();
         plugin.messages().sendRaw(sender, "&aForced countdown for &f" + arena.getName());
         return true;
+    }
+
+    /** {@code /soccer botmatch <arena> [red-level] [blue-level]} — watch the AI play itself. */
+    private boolean botMatch(CommandSender sender, String[] args) {
+        if (notAdmin(sender)) {
+            return true;
+        }
+        if (args.length < 2) {
+            plugin.messages().sendRaw(sender, "&cUsage: /soccer botmatch <arena> [easy|medium|hard] [easy|medium|hard]");
+            return true;
+        }
+        Arena arena = requireArena(sender, args);
+        if (arena == null) {
+            return true;
+        }
+        BotDifficulty red = args.length >= 3 ? parseDifficulty(args[2]) : BotDifficulty.MEDIUM;
+        BotDifficulty blue = args.length >= 4 ? parseDifficulty(args[3]) : red;
+        if (red == null || blue == null) {
+            plugin.messages().sendRaw(sender, "&cLevel must be easy, medium or hard.");
+            return true;
+        }
+        Game game = plugin.games().startExhibitionBotMatch(arena, red, blue);
+        if (game == null) {
+            plugin.messages().sendRaw(sender, "&cCould not start: arena busy or not ready, or bots are disabled.");
+            return true;
+        }
+        plugin.messages().sendRaw(sender, "&aBot match on &f" + arena.getName() + "&a: &c"
+                + red.name().toLowerCase(Locale.ROOT) + " &7vs &9" + blue.name().toLowerCase(Locale.ROOT)
+                + "&a. Use &f/soccer stadium " + arena.getName() + " &ato bring everyone to watch.");
+        return true;
+    }
+
+    private static BotDifficulty parseDifficulty(String raw) {
+        return switch (raw.toLowerCase(Locale.ROOT)) {
+            case "easy", "e", "лёгкий", "легкий" -> BotDifficulty.EASY;
+            case "medium", "m", "normal", "средний" -> BotDifficulty.MEDIUM;
+            case "hard", "h", "сложный" -> BotDifficulty.HARD;
+            default -> null;
+        };
     }
 
     private boolean adminStop(CommandSender sender, String[] args) {
@@ -973,6 +1014,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
             plugin.messages().sendRaw(sender, "&c/soccer setballspawn|setredspawn|setbluespawn|setlobby");
             plugin.messages().sendRaw(sender, "&c/soccer setredpenalty|setbluepenalty <arena>");
             plugin.messages().sendRaw(sender, "&c/soccer pos1|pos2|enable|disable|start|stop|penalty|reload");
+            plugin.messages().sendRaw(sender, "&c/soccer botmatch <arena> [easy|medium|hard] [easy|medium|hard] &7- AI vs AI");
             plugin.messages().sendRaw(sender, "&c/soccer resetstats <player|all> &7- reset lifetime stats");
             plugin.messages().sendRaw(sender, "&c/soccer addoutline|clearoutlines|listoutlines <arena>");
             plugin.messages().sendRaw(sender, "&c/soccer cupcreate <id> <league|knockout> [name] [arena]");
@@ -1074,6 +1116,9 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
                 return filter(plugin.arenas().getArenaNames(), args[1]);
             }
         }
+        if ((args.length == 3 || args.length == 4) && args[0].equalsIgnoreCase("botmatch")) {
+            return filter(Arrays.asList("easy", "medium", "hard"), args[args.length - 1]);
+        }
         if (args.length == 3 && args[0].equalsIgnoreCase("cupbotmatch")) {
             Championship championship = plugin.championships().get(args[1]);
             if (championship == null) {
@@ -1102,7 +1147,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         return Arrays.asList("join", "delete", "setfield", "setredgoal", "setbluegoal",
                 "setballspawn", "setredspawn", "setbluespawn", "setlobby", "setspectator",
                 "setredpenalty", "setbluepenalty",
-                "enable", "disable", "start", "stop", "penalty", "cleanup",
+                "enable", "disable", "start", "botmatch", "stop", "penalty", "cleanup",
                 "addoutline", "clearoutlines", "listoutlines").contains(sub);
     }
 

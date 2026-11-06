@@ -55,6 +55,9 @@ final class PlayerNpcSupport {
     private static Method entitySetSprinting;
     private static Method entityGetEntityData;
     private static Method synchedGetNonDefault;
+    private static Method synchedPackDirty;
+    private static Method entitySetPose;
+    private static Class<?> poseClass;
     private static Method synchedSet;
     private static Method serverPlayerGetUuid;
     private static Method serverPlayerGetGameProfile;
@@ -153,7 +156,15 @@ final class PlayerNpcSupport {
             entitySetSprinting = nmsEntityClass.getMethod("setSprinting", boolean.class);
             entityGetEntityData = nmsEntityClass.getMethod("getEntityData");
             synchedGetNonDefault = synchedData.getMethod("getNonDefaultValues");
+            synchedPackDirty = findMethod(synchedData, "packDirty");
             synchedSet = synchedData.getMethod("set", dataAccessor, Object.class);
+            try {
+                poseClass = Class.forName("net.minecraft.world.entity.Pose");
+                entitySetPose = findMethod(nmsEntityClass, "setPose", poseClass);
+            } catch (ClassNotFoundException ignored) {
+                poseClass = null;
+                entitySetPose = null;
+            }
             serverPlayerGetUuid = serverPlayerClass.getMethod("getUUID");
             serverPlayerGetGameProfile = serverPlayerClass.getMethod("getGameProfile");
 
@@ -310,6 +321,41 @@ final class PlayerNpcSupport {
         return 0;
     }
 
+    /** Signed texture property of an online player, so a stand-in body can wear their real skin. */
+    static BotSkins.Skin skinOf(Player player) {
+        if (!AVAILABLE || player == null) {
+            return null;
+        }
+        try {
+            Object handle = craftPlayerGetHandle.invoke(player);
+            Object profile = serverPlayerGetGameProfile.invoke(handle);
+            Object properties = gameProfileGetProperties.invoke(profile);
+            Method get = properties.getClass().getMethod("get", Object.class);
+            Object textures = get.invoke(properties, "textures");
+            if (textures instanceof Iterable<?> iterable) {
+                for (Object property : iterable) {
+                    Object value = invokeFirst(property, "value", "getValue");
+                    Object signature = invokeFirst(property, "signature", "getSignature");
+                    if (value instanceof String text && !text.isBlank()) {
+                        return new BotSkins.Skin(text, signature instanceof String sig ? sig : null);
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+        }
+        return null;
+    }
+
+    private static Object invokeFirst(Object target, String... names) {
+        for (String name : names) {
+            try {
+                return target.getClass().getMethod(name).invoke(target);
+            } catch (ReflectiveOperationException ignored) {
+            }
+        }
+        return null;
+    }
+
     private static void applySkin(Object profile, BotSkins.Skin skin) throws ReflectiveOperationException {
         if (skin == null || skin.value() == null) {
             return;
@@ -327,6 +373,7 @@ final class PlayerNpcSupport {
         private final int entityId;
         private final Set<UUID> viewers = new HashSet<>();
         private Location location;
+        private float pitch;
         private double lastSentX;
         private double lastSentY;
         private double lastSentZ;
@@ -404,18 +451,30 @@ final class PlayerNpcSupport {
         }
 
         void update(Location loc, boolean sprint, float yaw) {
+            update(loc, sprint, yaw, 0f);
+        }
+
+        /**
+         * Moves the NPC and aims its head. {@code yaw} is the view direction: the
+         * client turns the body toward the direction of travel on its own (within
+         * ~50° of the head), so a bot can run one way while watching the ball.
+         */
+        void update(Location loc, boolean sprint, float yaw, float headPitch) {
             if (loc == null) {
                 return;
             }
             this.location = loc.clone();
             this.location.setYaw(yaw);
+            this.location.setPitch(headPitch);
+            this.pitch = headPitch;
             try {
                 if (entityAbsMoveTo != null) {
                     entityAbsMoveTo.invoke(serverPlayer,
-                            loc.getX(), loc.getY(), loc.getZ(), yaw, 0f);
+                            loc.getX(), loc.getY(), loc.getZ(), yaw, headPitch);
                 } else {
                     entitySetPos.invoke(serverPlayer, loc.getX(), loc.getY(), loc.getZ());
                     entitySetYRot.invoke(serverPlayer, yaw);
+                    entitySetXRot.invoke(serverPlayer, headPitch);
                 }
                 entitySetYHeadRot.invoke(serverPlayer, yaw);
                 if (entitySetYBodyRot != null) {
@@ -433,13 +492,29 @@ final class PlayerNpcSupport {
 
         void faceYaw(float yaw) {
             if (location != null) {
-                update(location, sprinting, yaw);
+                update(location, sprinting, yaw, pitch);
+            }
+        }
+
+        /** Body pose by vanilla name (STANDING, CROUCHING, SWIMMING...); ignored when unsupported. */
+        void setPose(String name) {
+            if (entitySetPose == null || poseClass == null || name == null) {
+                return;
+            }
+            try {
+                @SuppressWarnings({"unchecked", "rawtypes"})
+                Object pose = Enum.valueOf((Class<Enum>) poseClass.asSubclass(Enum.class), name);
+                entitySetPose.invoke(serverPlayer, pose);
+                dataDirty = true;
+            } catch (IllegalArgumentException | ReflectiveOperationException ignored) {
             }
         }
 
         private void broadcast(float yaw) {
             List<Player> nearby = viewersInRange();
             Set<UUID> stillVisible = new HashSet<>();
+            Object metadata = dataDirty ? buildMetadataPacket() : null;
+            dataDirty = false;
             for (Player viewer : nearby) {
                 stillVisible.add(viewer.getUniqueId());
                 if (!viewers.contains(viewer.getUniqueId())) {
@@ -447,6 +522,12 @@ final class PlayerNpcSupport {
                     viewers.add(viewer.getUniqueId());
                 } else {
                     sendMove(viewer, yaw);
+                    if (metadata != null) {
+                        try {
+                            send(viewer, metadata);
+                        } catch (ReflectiveOperationException ignored) {
+                        }
+                    }
                 }
             }
             if (!viewers.isEmpty()) {
@@ -674,10 +755,6 @@ final class PlayerNpcSupport {
                     hasSentPosition = true;
                 }
                 sendHeadRotation(viewer, yaw);
-                if (dataDirty) {
-                    sendMetadata(viewer);
-                    dataDirty = false;
-                }
             } catch (ReflectiveOperationException ex) {
                 LOG.fine("[AdvancedSoccer] NPC move packet failed: " + ex.getMessage());
             }
@@ -707,7 +784,8 @@ final class PlayerNpcSupport {
             short sdy = (short) Math.round(dy * 4096.0);
             short sdz = (short) Math.round(dz * 4096.0);
             byte yRot = (byte) (yaw * 256.0f / 360.0f);
-            Object packet = movePosRotCtor.newInstance(entityId, sdx, sdy, sdz, yRot, (byte) 0, true);
+            byte xRot = (byte) (pitch * 256.0f / 360.0f);
+            Object packet = movePosRotCtor.newInstance(entityId, sdx, sdy, sdz, yRot, xRot, true);
             send(viewer, packet);
         }
 
@@ -726,7 +804,7 @@ final class PlayerNpcSupport {
                     && params[1].isAssignableFrom(positionMoveRotationCtor.getDeclaringClass())) {
                 Object position = vec3Ctor.newInstance(location.getX(), location.getY(), location.getZ());
                 Object delta = vec3Zero != null ? vec3Zero : vec3Ctor.newInstance(0.0, 0.0, 0.0);
-                Object change = positionMoveRotationCtor.newInstance(position, delta, yaw, 0f);
+                Object change = positionMoveRotationCtor.newInstance(position, delta, yaw, pitch);
                 return new Object[]{entityId, change, Collections.emptySet(), true};
             }
             if (params.length >= 4 && params[0] == int.class && params[1] == double.class) {
@@ -739,7 +817,7 @@ final class PlayerNpcSupport {
                     args[4] = (byte) (yaw * 256.0f / 360.0f);
                 }
                 if (params.length >= 6 && params[5] == byte.class) {
-                    args[5] = (byte) 0;
+                    args[5] = (byte) (pitch * 256.0f / 360.0f);
                 }
                 if (params.length >= 7 && params[6] == boolean.class) {
                     args[6] = true;
@@ -765,6 +843,25 @@ final class PlayerNpcSupport {
                 }
             } catch (ReflectiveOperationException ignored) {
             }
+        }
+
+        /**
+         * Changed entity data for viewers that already see the NPC. Dirty values
+         * include resets back to defaults (end of sprint, standing up again),
+         * which the non-default snapshot would silently drop.
+         */
+        private Object buildMetadataPacket() {
+            try {
+                Object data = entityGetEntityData.invoke(serverPlayer);
+                Object values = synchedPackDirty != null
+                        ? synchedPackDirty.invoke(data)
+                        : synchedGetNonDefault.invoke(data);
+                if (values instanceof List<?> list && !list.isEmpty()) {
+                    return setEntityDataCtor.newInstance(entityId, list);
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+            return null;
         }
 
         void swing() {

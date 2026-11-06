@@ -95,6 +95,12 @@ public final class PlayerActionListener implements Listener {
     @EventHandler
     public void onSneak(PlayerToggleSneakEvent event) {
         Game game = plugin.games().getGame(event.getPlayer());
+        if (game != null && game.isIntroRunning()) {
+            if (event.isSneaking()) {
+                game.voteSkipIntro(event.getPlayer());
+            }
+            return;
+        }
         if (game == null || blocksInput(game, event.getPlayer())) {
             return;
         }

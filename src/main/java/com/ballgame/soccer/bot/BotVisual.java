@@ -48,6 +48,7 @@ final class BotVisual {
     private ArmorStand fallback;
     private Location lastPos;
     private ItemStack[] armorKit;
+    private ItemStack[] armorOverride;
 
     private final Game game;
 
@@ -66,6 +67,12 @@ final class BotVisual {
         this.skinOverride = skinOverride;
         this.game = game;
         this.armorKit = teamArmor();
+    }
+
+    /** Fixed kit instead of the team colours (e.g. the referee's black strip). */
+    void setArmorOverride(ItemStack[] kit) {
+        armorOverride = kit;
+        armorKit = teamArmor();
     }
 
     void refreshArmorKit() {
@@ -280,6 +287,9 @@ final class BotVisual {
     }
 
     private ItemStack[] teamArmor() {
+        if (armorOverride != null) {
+            return armorOverride;
+        }
         Color color = game != null ? game.getTeamKitColor(team)
                 : (team == TeamSide.RED ? Color.fromRGB(210, 45, 45) : Color.fromRGB(45, 85, 210));
         return new ItemStack[] {
@@ -391,6 +401,14 @@ final class BotVisual {
     }
 
     void move(Location location, boolean sprinting, Vector velocity) {
+        move(location, sprinting, velocity, location != null ? location.getYaw() : 0f, 0f);
+    }
+
+    /**
+     * Moves the body; {@code headYaw}/{@code headPitch} aim the head independently
+     * of the direction of travel (packet NPC and mannequin backends).
+     */
+    void move(Location location, boolean sprinting, Vector velocity, float headYaw, float headPitch) {
         if (location == null) {
             return;
         }
@@ -400,7 +418,7 @@ final class BotVisual {
             return;
         }
         if (backend == Backend.PLAYER_NPC && playerNpc != null) {
-            playerNpc.update(location, sprinting, location.getYaw());
+            playerNpc.update(location, sprinting, headYaw, headPitch);
             lastPos = location.clone();
             return;
         }
@@ -408,7 +426,7 @@ final class BotVisual {
             return;
         }
         Location at = location.clone();
-        at.setPitch(0f);
+        at.setPitch(backend == Backend.MANNEQUIN ? headPitch : 0f);
         entity.teleport(at);
         if (entity instanceof LivingEntity living) {
             invokeBoolean(living, "setSprinting", sprinting);
@@ -458,6 +476,10 @@ final class BotVisual {
             citizensNpc.applySneak(true);
             return;
         }
+        if (backend == Backend.PLAYER_NPC && playerNpc != null) {
+            playerNpc.setPose("SWIMMING");
+            return;
+        }
         if (entity instanceof LivingEntity living) {
             invokeBoolean(living, "setSneaking", true);
             invokeBoolean(living, "setSwimming", true);
@@ -469,9 +491,28 @@ final class BotVisual {
             citizensNpc.applySneak(false);
             return;
         }
+        if (backend == Backend.PLAYER_NPC && playerNpc != null) {
+            playerNpc.setPose("STANDING");
+            return;
+        }
         if (entity instanceof LivingEntity living) {
             invokeBoolean(living, "setSneaking", false);
             invokeBoolean(living, "setSwimming", false);
+        }
+    }
+
+    /** Knees bent: keeper's set position, players catching their breath. */
+    void applyCrouch(boolean crouch) {
+        if (backend == Backend.CITIZENS && citizensNpc != null) {
+            citizensNpc.applySneak(crouch);
+            return;
+        }
+        if (backend == Backend.PLAYER_NPC && playerNpc != null) {
+            playerNpc.setPose(crouch ? "CROUCHING" : "STANDING");
+            return;
+        }
+        if (entity instanceof LivingEntity living) {
+            invokeBoolean(living, "setSneaking", crouch);
         }
     }
 

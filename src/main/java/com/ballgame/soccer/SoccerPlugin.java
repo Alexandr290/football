@@ -186,6 +186,10 @@ public final class SoccerPlugin extends JavaPlugin {
             if (removed > 0) {
                 getLogger().info("Removed " + removed + " orphaned soccer ball(s) from arenas.");
             }
+            int cameras = com.ballgame.soccer.cinematic.CameraRig.cleanupOrphans(this);
+            if (cameras > 0) {
+                getLogger().info("Removed " + cameras + " orphaned cinematic camera(s).");
+            }
         }, 40L);
     }
 
