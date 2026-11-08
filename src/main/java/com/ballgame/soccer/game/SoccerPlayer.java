@@ -1,13 +1,15 @@
 package com.ballgame.soccer.game;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 
 import java.util.UUID;
 
 /**
- * Per-match state for a participating player: their team, live stamina, shot
- * charge progress, tackle cooldown and in-match statistics.
+ * Per-match state for a participating player: their team, live stamina, chosen
+ * shot power, tackle cooldown and in-match statistics.
  */
 public final class SoccerPlayer {
 
@@ -20,8 +22,8 @@ public final class SoccerPlayer {
     private boolean sentOff;
 
     private double stamina;
-    private boolean charging;
-    private long chargeStartTick = -1;
+    /** Selected shot power, 0.1 .. 0.9. Hotbar slot 1 is 10%, slot 7 is 70%. */
+    private double shotPower = 0.1;
     private long tackleReadyTick = 0;
 
     // in-match stats
@@ -37,6 +39,22 @@ public final class SoccerPlayer {
     private int saves;
     private int fouls;
     private long possessionTicks;
+    private int shotsOnTarget;
+    private int shotsOffTarget;
+    private int chancesCreated;
+    private int chancesMissed;
+    private int tacklesWon;
+    private int interceptions;
+    private int keyPasses;
+    private int crosses;
+    private int clearances;
+    private int dribbles;
+    private int dribblePressureTicks;
+    private long dribbleCooldownUntil;
+    private double distanceCovered;
+    private double maxSpeed;
+    private Location sampleLocation;
+    private Vector lastStep = new Vector();
 
     public static SoccerPlayer createReferee(Player player, double startingStamina) {
         SoccerPlayer sp = new SoccerPlayer(player, null, startingStamina);
@@ -149,36 +167,21 @@ public final class SoccerPlayer {
         this.stamina = Math.min(max, this.stamina + amount);
     }
 
-    // --- charging ---
+    // --- shot power ---
 
-    public boolean isCharging() {
-        return charging;
+    /** Chosen shot power from 0.1 (soft) to 0.9. */
+    public double getShotPower() {
+        return shotPower;
     }
 
-    public void startCharging(long currentTick) {
-        this.charging = true;
-        this.chargeStartTick = currentTick;
+    public void setShotPower(double power) {
+        this.shotPower = Math.max(0.1, Math.min(0.9, power));
     }
 
-    public void stopCharging() {
-        this.charging = false;
-        this.chargeStartTick = -1;
-    }
-
-    public long getChargeStartTick() {
-        return chargeStartTick;
-    }
-
-    /**
-     * Fraction (0..1) of charge accumulated given the current tick and the
-     * configured charge time in ticks.
-     */
-    public double chargeFraction(long currentTick, double chargeTicks) {
-        if (!charging || chargeStartTick < 0 || chargeTicks <= 0) {
-            return 0.0;
-        }
-        double held = currentTick - chargeStartTick;
-        return Math.max(0.0, Math.min(1.0, held / chargeTicks));
+    /** Hotbar slot {@code 0} is 10%, slot {@code 6} (the 7 key) is 70%. */
+    public static double powerForHotbarSlot(int slot) {
+        int number = Math.max(0, Math.min(8, slot)) + 1;
+        return number / 10.0;
     }
 
     // --- tackle cooldown ---
@@ -233,6 +236,89 @@ public final class SoccerPlayer {
     public long getPossessionTicks() { return possessionTicks; }
     public void addPossessionTick() { this.possessionTicks++; }
 
+    public int getShotsOnTarget() { return shotsOnTarget; }
+    public void addShotOnTarget() { this.shotsOnTarget++; }
+
+    public int getShotsOffTarget() { return shotsOffTarget; }
+    public void addShotOffTarget() { this.shotsOffTarget++; }
+
+    public int getChancesCreated() { return chancesCreated; }
+    public void addChanceCreated() { this.chancesCreated++; }
+
+    public int getChancesMissed() { return chancesMissed; }
+    public void addChanceMissed() { this.chancesMissed++; }
+
+    public int getTacklesWon() { return tacklesWon; }
+    public void addTackleWon() { this.tacklesWon++; }
+
+    public int getInterceptions() { return interceptions; }
+    public void addInterception() { this.interceptions++; }
+
+    public int getKeyPasses() { return keyPasses; }
+    public void addKeyPass() { this.keyPasses++; }
+
+    public int getCrosses() { return crosses; }
+    public void addCross() { this.crosses++; }
+
+    public int getClearances() { return clearances; }
+    public void addClearance() { this.clearances++; }
+
+    public int getDribbles() { return dribbles; }
+    public void addDribble() { this.dribbles++; }
+
+    public double getDistanceCovered() { return distanceCovered; }
+    public double getMaxSpeed() { return maxSpeed; }
+    public Vector getLastStep() { return lastStep.clone(); }
+
+    /** Won duels: tackles that took the ball plus dribbles that beat a man. */
+    public int getDuelsWon() { return tacklesWon + dribbles; }
+
+    /**
+     * One successful dribble per challenge. Standing next to an opponent does
+     * not add a dribble every tick.
+     */
+    public void tickDribbleChallenge(boolean opponentNear, long matchTick) {
+        if (matchTick < dribbleCooldownUntil) {
+            return;
+        }
+        if (!opponentNear) {
+            dribblePressureTicks = 0;
+            return;
+        }
+        dribblePressureTicks++;
+        if (dribblePressureTicks >= 18) {
+            dribbles++;
+            dribblePressureTicks = 0;
+            dribbleCooldownUntil = matchTick + 50;
+        }
+    }
+
+    /** Distance and top speed. Teleports (kickoff, goal reset) are ignored. */
+    public void sampleMovement(Location now) {
+        if (now == null) {
+            return;
+        }
+        if (sampleLocation != null && sampleLocation.getWorld() != null
+                && sampleLocation.getWorld().equals(now.getWorld())) {
+            double dx = now.getX() - sampleLocation.getX();
+            double dz = now.getZ() - sampleLocation.getZ();
+            double dist = Math.hypot(dx, dz);
+            if (dist <= 1.5) {
+                distanceCovered += dist;
+                double blocksPerSecond = dist * 20.0;
+                if (blocksPerSecond > maxSpeed) {
+                    maxSpeed = blocksPerSecond;
+                }
+                lastStep = new Vector(dx, 0, dz);
+            } else {
+                lastStep = new Vector();
+            }
+        } else {
+            lastStep = new Vector();
+        }
+        sampleLocation = now.clone();
+    }
+
     /** Completed passes / attempted passes, 0–100. */
     public int passAccuracyPercent() {
         if (passes <= 0) {
@@ -241,19 +327,35 @@ public final class SoccerPlayer {
         return (int) Math.round((double) passesCompleted / passes * 100.0);
     }
 
-    /** Match rating from 1.0 to 10.0 based on in-match performance. */
+    /**
+     * Match rating from 1.0 to 10.0.
+     * A quiet game starts at 6.2. One goal is one goal on the stat line and
+     * about one point here — it is never stored as five.
+     */
     public double matchRating(long totalPossessionTicks) {
-        double rating = 5.0;
-        rating += goals * 1.4;
-        rating += assists * 0.7;
-        rating += saves * 0.45;
-        rating += shots * 0.15;
-        rating += passAccuracyPercent() * 0.015;
-        rating += passesReceived * 0.04;
-        if (totalPossessionTicks > 0) {
-            rating += (double) possessionTicks / totalPossessionTicks * 2.5;
+        double rating = 6.2;
+        rating += goals * 1.0;
+        rating += assists * 0.6;
+        rating += Math.min(1.2, chancesCreated * 0.2);
+        rating += Math.min(0.8, shotsOnTarget * 0.08);
+        rating += Math.min(1.5, saves * 0.25);
+        rating += Math.min(0.6, tacklesWon * 0.06);
+        rating += Math.min(0.5, interceptions * 0.05);
+        rating += Math.min(0.5, keyPasses * 0.08);
+        rating += Math.min(0.4, dribbles * 0.05);
+        rating += Math.min(0.4, clearances * 0.04);
+        if (passes >= 5) {
+            rating += (passAccuracyPercent() - 70) * 0.012;
         }
-        rating -= fouls * 0.9;
+        if (totalPossessionTicks > 0) {
+            double share = (double) possessionTicks / totalPossessionTicks;
+            rating += Math.min(0.4, Math.max(-0.2, (share - 0.08) * 1.5));
+        }
+        rating -= chancesMissed * 0.3;
+        rating -= ownGoals * 1.0;
+        rating -= fouls * 0.25;
+        rating -= yellowCards * 0.35;
+        rating -= Math.min(0.4, shotsOffTarget * 0.02);
         return Math.max(1.0, Math.min(10.0, rating));
     }
 }

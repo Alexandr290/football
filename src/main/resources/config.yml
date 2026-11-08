@@ -5,13 +5,13 @@
 # the game without touching code. Colors use '&' codes (and hex &#RRGGBB).
 # =====================================================================
 
-config-version: 24
+config-version: 26
 
 settings:
   # Chat prefix (overrides the language file prefix when set).
   prefix: "&8[&aSoccer&8] &r"
   # Language file to load from plugins/AdvancedSoccer/lang/ (en, ru).
-  language: en
+  language: ru
   # How often (in seconds) arenas/stats are auto-saved to disk.
   auto-save-interval: 300
   # Use the action bar for HUD (power/stamina). If false, uses XP bar only.
@@ -33,7 +33,10 @@ game:
   lobby-bot-fill-grace: 15
   # Seconds of the kickoff countdown (3..2..1..GO) before the ball unlocks.
   kickoff-countdown: 3
-  # Total match duration in seconds (split across halves).
+  # Seconds for the whole match, then split across halves.
+  # 300 with halves: 2 is 2:30, then half-time, then 5:00.
+  # The running server reads plugins/AdvancedSoccer/config.yml.
+  # Editing this copy, or the copy inside the jar, does nothing once that file exists.
   match-duration: 300
   # Number of halves. Duration is divided evenly between them.
   halves: 2
@@ -279,7 +282,7 @@ crowd:
     # manual = local install only, no server download | download | url
     mode: download
     auto-serve: true
-    prompt-on-join: true
+    prompt-on-join: false
     port: 8123
     public-host: ""
     url: ""
@@ -358,11 +361,11 @@ ball:
 mechanics:
   # Max horizontal reach (blocks) to touch the ball.
   kick-reach: 3.0
-  # Base kick power applied on a light touch (left-click / walking into ball).
+  # Softest left-click, when shot power (mouse wheel) is at 0%.
   light-touch-power: 0.45
-  # Maximum charged-shot power (sneak + hold to charge, then release).
+  # Hardest configured strike. Players pick 10–90% with hotbar slots 1–9 (slot 7 = 70%).
   max-shot-power: 2.8
-  # Seconds to fully charge a shot from min to max.
+  # Legacy. Players no longer charge by holding sneak.
   charge-time: 1.2
   # Upward lift added to shots so the ball arcs realistically.
   shot-lift: 0.32
@@ -378,7 +381,7 @@ mechanics:
   tackle-enabled: true
   tackle-power: 1.1
   tackle-cooldown: 4.0
-  # Stamina system. Sprinting/charging consumes stamina.
+  # Stamina system. Sprinting drains it; a shot also costs charge-drain × 4.
   stamina-enabled: true
   max-stamina: 100.0
   stamina-regen: 1.2

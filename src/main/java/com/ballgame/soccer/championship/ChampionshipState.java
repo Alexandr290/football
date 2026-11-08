@@ -7,9 +7,9 @@ public enum ChampionshipState {
 
     public String display() {
         return switch (this) {
-            case REGISTRATION -> "Registration";
-            case ACTIVE -> "In Progress";
-            case FINISHED -> "Finished";
+            case REGISTRATION -> "Регистрация";
+            case ACTIVE -> "Идёт";
+            case FINISHED -> "Завершён";
         };
     }
 }

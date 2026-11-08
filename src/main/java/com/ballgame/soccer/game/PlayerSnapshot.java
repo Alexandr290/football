@@ -2,6 +2,7 @@ package com.ballgame.soccer.game;
 
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.WeatherType;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -27,6 +28,9 @@ public final class PlayerSnapshot {
     private final boolean allowFlight;
     private final boolean flying;
     private final Collection<PotionEffect> potionEffects;
+    private final long playerTime;
+    private final boolean playerTimeRelative;
+    private final WeatherType playerWeather;
 
     private PlayerSnapshot(Player player) {
         this.inventory = player.getInventory().getContents().clone();
@@ -45,6 +49,9 @@ public final class PlayerSnapshot {
         this.allowFlight = player.getAllowFlight();
         this.flying = player.isFlying();
         this.potionEffects = player.getActivePotionEffects();
+        this.playerTime = player.getPlayerTime();
+        this.playerTimeRelative = player.isPlayerTimeRelative();
+        this.playerWeather = player.getPlayerWeather();
     }
 
     public static PlayerSnapshot capture(Player player) {
@@ -70,6 +77,12 @@ public final class PlayerSnapshot {
             player.removePotionEffect(effect.getType());
         }
         player.addPotionEffects(potionEffects);
+        player.setPlayerTime(playerTime, playerTimeRelative);
+        if (playerWeather != null) {
+            player.setPlayerWeather(playerWeather);
+        } else {
+            player.resetPlayerWeather();
+        }
         player.updateInventory();
         player.teleport(location);
     }

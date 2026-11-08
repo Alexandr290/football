@@ -757,6 +757,7 @@ public final class MatchIntro {
                     || player.getSpectatorTarget() != null
                     || !player.getWorld().equals(frame.world())
                     || plugin.games().getGame(player) != null
+                    || plugin.games().isFreeSpectator(player)
                     || player.getLocation().distanceSquared(center) > SPECTATOR_RANGE_SQ) {
                 continue;
             }

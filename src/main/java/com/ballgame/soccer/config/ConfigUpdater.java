@@ -73,6 +73,19 @@ public final class ConfigUpdater {
         if (from < 24 && to >= 24) {
             migrateToV24(config);
         }
+        if (from < 25 && to >= 25) {
+            migrateToV25(config);
+        }
+        if (from < 26 && to >= 26) {
+            config.set("crowd.resource-pack.prompt-on-join", false);
+        }
+    }
+
+    /** FIFA hub ships as a Russian-first interface. Preserve any non-default custom locale. */
+    private static void migrateToV25(FileConfiguration config) {
+        if ("en".equalsIgnoreCase(config.getString("settings.language", "en"))) {
+            config.set("settings.language", "ru");
+        }
     }
 
     /** Bot squad cap raised to 11 per side. */
@@ -111,7 +124,11 @@ public final class ConfigUpdater {
         FileConfiguration current = file.exists()
                 ? YamlConfiguration.loadConfiguration(file)
                 : new YamlConfiguration();
-        if (mergeSections(defaults, current)) {
+        boolean changed = mergeSections(defaults, current);
+        if (refreshGamesGui(defaults, current)) {
+            changed = true;
+        }
+        if (changed) {
             try {
                 current.save(file);
                 plugin.getLogger().info("lang/" + code + ".yml updated with new translations.");
@@ -119,6 +136,31 @@ public final class ConfigUpdater {
                 plugin.getLogger().log(Level.WARNING, "Could not save lang/" + code + ".yml", ex);
             }
         }
+    }
+
+    /** Match-history screen is Russian in every language file. Refresh those lines from the jar. */
+    private static boolean refreshGamesGui(ConfigurationSection defaults, ConfigurationSection target) {
+        ConfigurationSection from = defaults.getConfigurationSection("messages");
+        if (from == null) {
+            return false;
+        }
+        ConfigurationSection to = target.getConfigurationSection("messages");
+        if (to == null) {
+            target.set("messages", from);
+            return true;
+        }
+        boolean changed = false;
+        for (String key : from.getKeys(false)) {
+            if (!key.startsWith("games-gui-")) {
+                continue;
+            }
+            Object value = from.get(key);
+            if (value != null && !value.equals(to.get(key))) {
+                to.set(key, value);
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     /**

@@ -14,7 +14,6 @@ import com.ballgame.soccer.bot.MatchBot;
 import com.ballgame.soccer.cinematic.MatchIntro;
 import com.ballgame.soccer.config.SoccerSettings;
 import com.ballgame.soccer.crowd.CrowdAudio;
-import com.ballgame.soccer.crowd.CrowdPackMode;
 import com.ballgame.soccer.event.BallKickEvent;
 import com.ballgame.soccer.event.GoalScoredEvent;
 import com.ballgame.soccer.event.MatchStateChangeEvent;
@@ -78,6 +77,7 @@ public final class Game {
     private final SoccerPlugin plugin;
     private final SoccerSettings settings;
     private final Arena arena;
+    private MatchOptions matchOptions;
 
     private GameState state = GameState.WAITING;
     private GameState resumeState = GameState.PLAYING;
@@ -91,6 +91,8 @@ public final class Game {
             new java.util.EnumMap<>(TeamSide.class);
     private final java.util.EnumMap<TeamSide, BotFormation> teamFormations =
             new java.util.EnumMap<>(TeamSide.class);
+    private int redTeamCap;
+    private int blueTeamCap;
 
     private Ball ball;
     private MatchScoreboard scoreboard;
@@ -123,6 +125,23 @@ public final class Game {
     private int redPenaltyFouls;
     private int bluePenaltyFouls;
     private UUID pendingPasserId;
+    /** How far the passer was from the opponent goal when the pass was struck. */
+    private double pendingPassStartDist = -1;
+    /** Last intentional pass. A dribble or a deflection does not wipe it. */
+    private UUID assistFromId;
+    private TeamSide assistFromTeam;
+    private long assistFromTick = -10_000L;
+    private boolean assistChancePending;
+    private UUID pendingShotId;
+    private boolean pendingShotOnTarget;
+    private boolean pendingShotBig;
+    private long pendingShotTick;
+    /** A goal already counted. Stays set until the next kickoff, so a ball sitting in the net cannot score again. */
+    private boolean awaitingKickoffAfterGoal;
+    /** Ball was already inside a goal on the previous check. Only the entry counts. */
+    private boolean ballWasInsideGoal;
+    /** Tackle claims the ball; do not also record that touch as an interception. */
+    private boolean suppressClaimStats;
 
     private boolean ended;
     private int cleanupTaskId = -1;
@@ -206,6 +225,8 @@ public final class Game {
     private String matchBlueName;
     private String redNationCode;
     private String blueNationCode;
+    private String redClubCode;
+    private String blueClubCode;
     private Color redKitColor;
     private Color blueKitColor;
     private String redKitChatColor;
@@ -251,14 +272,45 @@ public final class Game {
     /** Bot goalkeeper holding the ball in his hands (null when the ball is in play). */
     private UUID keeperHolderId;
     private int keeperHoldTicks;
+    /** Keeper who just released the ball, so he cannot catch his own throw. */
+    private UUID keeperReleaseId;
+    private long keeperReleaseUntilTick;
 
     public Game(SoccerPlugin plugin, Arena arena) {
         this.plugin = plugin;
         this.settings = plugin.settings();
         this.arena = arena;
+        this.redTeamCap = settings.maxPlayersPerTeam;
+        this.blueTeamCap = settings.maxPlayersPerTeam;
         if (settings.scoreboardEnabled) {
             this.scoreboard = new MatchScoreboard(settings.scoreboardTitle);
         }
+    }
+
+    public void setMatchOptions(MatchOptions options) {
+        this.matchOptions = options;
+        for (SoccerPlayer sp : players.values()) {
+            Player player = sp.getBukkitPlayer();
+            if (player != null && player.isOnline()) {
+                applyMatchPresentation(player);
+            }
+        }
+    }
+
+    private void applyMatchPresentation(Player player) {
+        if (player == null || matchOptions == null) {
+            return;
+        }
+        player.setPlayerTime(matchOptions.playerTime(), false);
+        player.setPlayerWeather(matchOptions.playerWeather());
+    }
+
+    private int configuredMatchDuration() {
+        return matchOptions != null ? matchOptions.durationSeconds() : settings.matchDuration;
+    }
+
+    private int configuredHalves() {
+        return matchOptions != null ? matchOptions.halves() : Math.max(1, settings.halves);
     }
 
     // ==================================================================
@@ -289,13 +341,13 @@ public final class Game {
         if (lobby != null) {
             player.teleport(lobby);
         }
+        applyMatchPresentation(player);
         if (scoreboard != null) {
             scoreboard.apply(player);
         }
         attachServerViewer(player);
         plugin.messages().send(player, "joined-queue",
                 "arena", arena.getName(), "team", teamName(team));
-        promptCrowdPackIfNeeded(player);
         broadcast(plugin.messages().format("player-joined",
                 "team_color", teamChat(team),
                 "player", player.getName(),
@@ -324,6 +376,7 @@ public final class Game {
         if (mid != null) {
             player.teleport(mid);
         }
+        applyMatchPresentation(player);
         if (scoreboard != null) {
             scoreboard.apply(player);
         }
@@ -1019,7 +1072,7 @@ public final class Game {
         ball.setFrozen(false);
         taker.getProfile().addTouch();
         if (refereePenaltyRestart) {
-            taker.getProfile().addShot();
+            registerShot(taker.getProfile());
         } else {
             registerPass(taker.getProfile());
         }
@@ -1052,7 +1105,7 @@ public final class Game {
         ball.applyImpulse(kick.impulse, kick.spin);
         ball.setFrozen(false);
         taker.getProfile().addTouch();
-        taker.getProfile().addShot();
+        registerShot(taker.getProfile());
         taker.swingArm();
 
         Location loc = ball.getLocation();
@@ -1330,25 +1383,6 @@ public final class Game {
         plugin.games().syncServerViewers();
     }
 
-    private void promptCrowdPackIfNeeded(Player player) {
-        if (!settings.crowdEnabled || !settings.crowdRealSounds) {
-            return;
-        }
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!players.containsKey(player.getUniqueId()) || !player.isOnline()) {
-                return;
-            }
-            if (plugin.crowdPack().canPlayCustom(player)) {
-                return;
-            }
-            if (settings.crowdPackPromptOnJoin) {
-                plugin.crowdPack().offer(player);
-            } else if (plugin.crowdPack().mode() == CrowdPackMode.MANUAL) {
-                plugin.messages().send(player, "crowd-pack-manual-accept-hint");
-            }
-        }, 30L);
-    }
-
     private void preparePlayer(Player player, SoccerPlayer sp) {
         player.getInventory().clear();
         player.getInventory().setArmorContents(null);
@@ -1397,6 +1431,25 @@ public final class Game {
     }
 
     private void refreshKitColors() {
+        com.ballgame.soccer.fifa.FifaClub redClub = redClubCode != null
+                ? plugin.clubCatalog().get(redClubCode) : null;
+        com.ballgame.soccer.fifa.FifaClub blueClub = blueClubCode != null
+                ? plugin.clubCatalog().get(blueClubCode) : null;
+        if (redClub != null || blueClub != null) {
+            redKitColor = clubColor(redClub != null ? redClub.getPrimaryColor() : null,
+                    Color.fromRGB(210, 45, 45));
+            blueKitColor = clubColor(blueClub != null ? blueClub.getPrimaryColor() : null,
+                    Color.fromRGB(45, 85, 210));
+            if (kitDistanceSquared(redKitColor, blueKitColor) < 2800 && blueClub != null) {
+                blueKitColor = clubColor(blueClub.getSecondaryColor(), Color.fromRGB(45, 85, 210));
+            }
+            if (kitDistanceSquared(redKitColor, blueKitColor) < 2800) {
+                blueKitColor = Color.fromRGB(45, 85, 210);
+            }
+            redKitChatColor = nearestChatColor(redKitColor);
+            blueKitChatColor = nearestChatColor(blueKitColor);
+            return;
+        }
         com.ballgame.soccer.fifa.FifaNation redNation = redNationCode != null
                 ? plugin.fifaCatalog().get(redNationCode) : null;
         com.ballgame.soccer.fifa.FifaNation blueNation = blueNationCode != null
@@ -1407,6 +1460,49 @@ public final class Game {
         blueKitColor = kits.blue();
         redKitChatColor = kits.redChat();
         blueKitChatColor = kits.blueChat();
+    }
+
+    private static Color clubColor(String hex, Color fallback) {
+        if (hex == null) {
+            return fallback;
+        }
+        String value = hex.trim();
+        if (value.startsWith("#")) {
+            value = value.substring(1);
+        }
+        try {
+            return value.length() == 6 ? Color.fromRGB(Integer.parseInt(value, 16)) : fallback;
+        } catch (IllegalArgumentException ignored) {
+            return fallback;
+        }
+    }
+
+    private static int kitDistanceSquared(Color a, Color b) {
+        int red = a.getRed() - b.getRed();
+        int green = a.getGreen() - b.getGreen();
+        int blue = a.getBlue() - b.getBlue();
+        return red * red + green * green + blue * blue;
+    }
+
+    private static String nearestChatColor(Color color) {
+        String[] codes = {"&0", "&1", "&2", "&3", "&4", "&5", "&6", "&7",
+                "&8", "&9", "&a", "&b", "&c", "&d", "&e", "&f"};
+        int[][] rgb = {{30,30,30},{0,0,120},{0,90,0},{0,110,110},{130,0,0},{100,0,100},
+                {210,160,0},{130,130,130},{70,70,70},{55,95,210},{70,190,70},{90,210,220},
+                {210,55,55},{200,90,200},{240,220,60},{245,245,245}};
+        int best = 0;
+        int distance = Integer.MAX_VALUE;
+        for (int i = 0; i < rgb.length; i++) {
+            int red = color.getRed() - rgb[i][0];
+            int green = color.getGreen() - rgb[i][1];
+            int blue = color.getBlue() - rgb[i][2];
+            int current = red * red + green * green + blue * blue;
+            if (current < distance) {
+                distance = current;
+                best = i;
+            }
+        }
+        return codes[best];
     }
 
     private void refreshHumanKitVisuals() {
@@ -1446,16 +1542,22 @@ public final class Game {
         }
     }
 
-    /** Hotbar marker so Q (drop item) always fires for the low cross. */
+    /**
+     * One cross item in every hotbar slot, named with that slot's shot power,
+     * so Q works wherever the selection sits and the slot itself is the power.
+     */
     private void equipCrossPassTrigger(Player player) {
-        ItemStack trigger = Items.named(Material.SLIME_BALL, " ");
-        ItemMeta meta = trigger.getItemMeta();
-        if (meta != null) {
-            meta.setUnbreakable(true);
-            trigger.setItemMeta(meta);
+        for (int slot = 0; slot < 9; slot++) {
+            int percent = (slot + 1) * 10;
+            ItemStack trigger = Items.named(Material.SLIME_BALL, "&f" + percent + "%");
+            ItemMeta meta = trigger.getItemMeta();
+            if (meta != null) {
+                meta.setUnbreakable(true);
+                trigger.setItemMeta(meta);
+            }
+            player.getInventory().setItem(slot, trigger);
         }
-        player.getInventory().setItem(0, trigger);
-        player.getInventory().setHeldItemSlot(0);
+        setShotPowerFromHotbar(player, player.getInventory().getHeldItemSlot());
     }
 
     private ItemStack dyed(Material material, Color color) {
@@ -1778,7 +1880,7 @@ public final class Game {
     }
 
     private void startHalf() {
-        secondsRemaining = Math.max(10, settings.matchDuration / settings.halves);
+        secondsRemaining = Math.max(10, configuredMatchDuration() / configuredHalves());
         halfStoppageAccumTicks = 0;
         inStoppageTime = false;
         stoppageSecondsRemaining = 0;
@@ -1797,12 +1899,8 @@ public final class Game {
     }
 
     private void positionForKickoff() {
-        if (ball == null) {
-            ball = new Ball(plugin);
-            ball.spawn(ballSpawnLocation());
-        }
-        ball.teleport(ballSpawnLocation());
-        ball.setFrozen(true);
+        kickoffTakerId = chooseKickoffTaker(kickoffTeam);
+        placeRestartBodies();
         ball.clearTouchHistory();
         forgetBallMemory();
         clearOffsidePhase();
@@ -1810,7 +1908,16 @@ public final class Game {
         celebrationScorerId = null;
         celebrationTeam = null;
         kickoffPendingTicks = 0;
-        kickoffTakerId = chooseKickoffTaker(kickoffTeam);
+    }
+
+    /** Ball on the spot, every player on his kickoff mark. Does not end a celebration. */
+    private void placeRestartBodies() {
+        if (ball == null) {
+            ball = new Ball(plugin);
+            ball.spawn(ballSpawnLocation());
+        }
+        ball.teleport(ballSpawnLocation());
+        ball.setFrozen(true);
         for (SoccerPlayer sp : players.values()) {
             Player p = sp.getBukkitPlayer();
             if (p == null) {
@@ -1836,7 +1943,6 @@ public final class Game {
             Location spot = kickoffSpotFor(bot);
             if (spot != null) {
                 bot.setLocation(spot);
-                bot.syncVisual();
             }
         }
     }
@@ -2000,6 +2106,10 @@ public final class Game {
         if (ball != null) {
             ball.setFrozen(false);
         }
+        awaitingKickoffAfterGoal = false;
+        ballWasInsideGoal = false;
+        clearAssistChain();
+        clearPendingShot();
         kickoffPendingTicks = settings.kickoffRules && kickoffTakerId != null ? 100 : 0;
         broadcast(plugin.messages().raw("kickoff"));
         offsideExemptTouch = true;
@@ -2091,7 +2201,7 @@ public final class Game {
             inStoppageTime = false;
             stoppageSecondsRemaining = 0;
             stoppageSecondsAdded = 0;
-            if (currentHalf < settings.halves) {
+            if (currentHalf < configuredHalves()) {
                 setState(GameState.HALFTIME);
                 countdown = settings.halftimeBreak;
                 if (ball != null) {
@@ -2432,10 +2542,9 @@ public final class Game {
         dive.setYaw(base.getYaw());
         dive.setPitch(0f);
 
-        penaltyKeeperDived = true;
-
         MatchBot keeperBot = bots.get(penaltyKeeperId);
         if (keeperBot != null) {
+            penaltyKeeperDived = true;
             keeperBot.penaltyDive(dive);
             if (dive.getWorld() != null) {
                 dive.getWorld().playSound(dive, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.95f, 0.65f);
@@ -2459,7 +2568,8 @@ public final class Game {
     }
 
     /**
-     * Human keeper dives laterally (Shift) before or during a penalty kick.
+     * Human keeper picks a side with one press. Looking across the goal dives to
+     * that post; looking at the kicker stays in the centre. Can be repeated.
      */
     public void penaltyKeeperDive(Player player) {
         if (!isPenaltyKeeper(player.getUniqueId())) {
@@ -2470,26 +2580,37 @@ public final class Game {
             return;
         }
         TeamSide defending = freeKickTeam != null ? freeKickTeam.opposite() : sp.getTeam();
-        Location base = player.getLocation();
-        Vector lateral = player.getLocation().getDirection().setY(0);
+        Location spot = computeGoalkeeperSpot(defending);
+        if (spot == null) {
+            spot = player.getLocation();
+        }
+        Vector attack = goalAttack(defending);
+        Vector lateral = new Vector(-attack.getZ(), 0, attack.getX());
         if (lateral.lengthSquared() < 1e-6) {
             return;
         }
         lateral.normalize();
-        Location dive = base.clone().add(lateral.multiply(1.35));
-        dive.setY(pitchGroundY() + 0.05);
-        Location clamped = BotAi.clampKeeperPosition(this, defending, dive);
-        if (clamped != null) {
-            dive = clamped;
+
+        Vector look = player.getLocation().getDirection();
+        look.setY(0);
+        if (look.lengthSquared() < 1e-6) {
+            look = attack.clone();
+        } else {
+            look.normalize();
         }
-        player.teleport(dive);
-        player.setSneaking(true);
-        player.setSwimming(true);
-        penaltyKeeperDived = true;
-        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.95f, 0.65f);
+
+        Location dive = spot.clone();
+        double side = look.dot(lateral);
+        if (Math.abs(side) < 0.35) {
+            dive.add(attack.clone().multiply(0.45));
+        } else {
+            dive.add(lateral.clone().multiply(Math.copySign(8.0, side)));
+            dive.add(attack.clone().multiply(0.35));
+        }
+        placeKeeperDive(player, defending, dive);
     }
 
-    /** Active punch-save when the keeper left-clicks during the penalty flight window. */
+    /** During the flight, left-click puts the keeper in front of the ball and punches it. */
     public void attemptPenaltyKeeperSave(Player player) {
         if (!isPenaltyKeeper(player.getUniqueId()) || !isPenaltySaveWindow()) {
             return;
@@ -2498,7 +2619,46 @@ public final class Game {
         if (sp == null || sp.isBot()) {
             return;
         }
+        lungeTowardBall(player, sp.getTeam());
         tryPenaltyKeeperSave(sp, player, true);
+    }
+
+    private void lungeTowardBall(Player player, TeamSide defending) {
+        if (ball == null || ball.getLocation() == null) {
+            return;
+        }
+        Location aim = ball.getLocation().clone();
+        Location spot = computeGoalkeeperSpot(defending);
+        if (spot != null) {
+            aim.setY(spot.getY());
+        }
+        placeKeeperDive(player, defending, aim);
+    }
+
+    private void placeKeeperDive(Player player, TeamSide defending, Location dive) {
+        dive.setY(pitchGroundY() + 0.05);
+        Location clamped = BotAi.clampKeeperPosition(this, defending, dive);
+        if (clamped != null) {
+            dive = clamped;
+        }
+        dive.setYaw(player.getLocation().getYaw());
+        dive.setPitch(0f);
+        player.teleport(dive);
+        player.setSneaking(true);
+        player.setWalkSpeed(0.2f);
+        penaltyKeeperDived = true;
+        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.95f, 0.65f);
+    }
+
+    private Vector goalAttack(TeamSide defending) {
+        if (pitchAxis != null && defending != null) {
+            Vector attack = pitchAxis.attackDirection(defending);
+            attack.setY(0);
+            if (attack.lengthSquared() > 1e-6) {
+                return attack.normalize();
+            }
+        }
+        return new Vector(0, 0, 1);
     }
 
     private void processPenaltyKeeperSaves() {
@@ -2527,11 +2687,12 @@ public final class Game {
         Location ballLoc = ball.getLocation();
         Location feet = player.getLocation();
         Location prev = ball.getPreviousTickLocation();
-        double reach = manual ? 3.2 : 2.6;
+        double reach = manual ? 4.2 : 3.4;
+        double height = manual ? 3.8 : 3.3;
         double horiz = Math.hypot(feet.getX() - ballLoc.getX(), feet.getZ() - ballLoc.getZ());
-        double dy = Math.abs((feet.getY() + 1.0) - ballLoc.getY());
-        boolean nearBall = horiz <= reach && dy <= 2.6;
-        boolean pathHit = segmentNearLocation(prev, ballLoc, feet, reach + 0.4, 2.8);
+        double dy = Math.abs((feet.getY() + 1.1) - ballLoc.getY());
+        boolean nearBall = horiz <= reach && dy <= height;
+        boolean pathHit = segmentNearLocation(prev, ballLoc, feet, reach + 0.6, height);
         if (!nearBall && !pathHit) {
             return false;
         }
@@ -3055,6 +3216,13 @@ public final class Game {
     }
 
     public com.ballgame.soccer.fifa.FifaPlayer fifaStarter(TeamSide team, int slot) {
+        String clubCode = team == TeamSide.RED ? redClubCode : blueClubCode;
+        if (clubCode != null && plugin.clubCatalog() != null) {
+            com.ballgame.soccer.fifa.FifaClub club = plugin.clubCatalog().get(clubCode);
+            if (club != null) {
+                return club.starterAt(slot);
+            }
+        }
         String code = team == TeamSide.RED ? redNationCode : blueNationCode;
         if (code == null || plugin.fifaCatalog() == null) {
             return null;
@@ -3194,8 +3362,6 @@ public final class Game {
                     ? arena.getGoal(sp.getTeam()).getCenter() : null;
             boolean nearOwnGoal = ownGoal != null
                     && Math.hypot(feet.getX() - ownGoal.getX(), feet.getZ() - ownGoal.getZ()) <= 14.0;
-            boolean keeperZone = isInOwnGoalBox(sp.getTeam(), feet)
-                    || (isKeeper && nearOwnGoal);
 
             double horiz = Math.hypot(feet.getX() - ballLoc.getX(), feet.getZ() - ballLoc.getZ());
             double dy = Math.abs((feet.getY() + 1.0) - ballLoc.getY());
@@ -3208,64 +3374,28 @@ public final class Game {
             }
 
             boolean isChaser = bot.getUuid().equals(getBallChaserBotId(sp.getTeam()));
-            boolean moving = bot.getSpeed() > 0.05;
-            boolean trap = speed > 0.12;
-            boolean dribble = isChaser && speed <= 0.12 && moving;
-
+            boolean possessor = bot.getUuid().equals(ball.getLastTouchId()) && horiz < 2.2;
+            if (!isKeeper && !isChaser && !possessor) {
+                continue;
+            }
             if (isKeeper && nearOwnGoal) {
                 continue;
             }
-            if (!trap && !dribble) {
+            if (isKickTrapImmune(bot.getUuid()) || isOwnCarry(bot)) {
                 continue;
             }
-            if (isKickTrapImmune(bot.getUuid())) {
+            if (isControlledByOpponent(sp.getTeam(), ballLoc)) {
                 continue;
             }
-
-            if (settings.botFirstTouch) {
-                if (bot.isStaggered(matchTick) || bot.isDown() || isOwnCarry(bot)
-                        || isControlledByOpponent(sp.getTeam(), ballLoc)) {
-                    continue;
-                }
-                if (trap) {
-                    if (!botTouchBlockedByOffside(bot)) {
-                        receiveBall(bot, ballLoc, speed, keeperZone);
-                    }
-                    return;
-                }
-                if (!bot.getUuid().equals(ball.getLastTouchId())) {
-                    if (botTouchBlockedByOffside(bot)) {
-                        return;
-                    }
-                    touchBall(bot.getUuid(), sp.getTeam());
-                    sp.addTouch();
-                    bot.markControl(matchTick);
-                }
-                if (!settings.botCloseControl && isChaser && moving) {
-                    ball.applyImpulse(Mechanics.dribbleNudge(bot, settings), null);
-                }
+            // Same rule as a player: the body does not kick. A rolling ball
+            // dies at the feet; a pass or a shot is a separate decision.
+            if (speed < 0.08 || speed > 0.55 || bot.getUuid().equals(ball.getLastTouchId())) {
                 continue;
             }
-
-            if (trap) {
-                double contactSpeed = speed;
-                ball.haltMotion();
-                if (keeperZone && contactSpeed > 0.38) {
-                    sp.addSave();
-                    if (crowd != null) {
-                        crowd.onSave(sp.getTeam());
-                    }
-                    feet.getWorld().spawnParticle(Particle.CRIT, ballLoc, 6, 0.1, 0.1, 0.1, 0.05);
-                }
+            if (botTouchBlockedByOffside(bot)) {
+                continue;
             }
-
-            touchBall(bot.getUuid(), sp.getTeam());
-            sp.addTouch();
-
-            if (isChaser && moving) {
-                Vector nudge = Mechanics.dribbleNudge(bot, settings);
-                ball.applyImpulse(nudge, null);
-            }
+            ball.haltMotion();
         }
     }
 
@@ -3286,12 +3416,36 @@ public final class Game {
         }
         UUID lastId = ball.getLastTouchId();
         TeamSide lastTeam = ball.getLastTouchTeam();
-        if (lastId == null || lastTeam == null || lastTeam == team || ball.getSpeed() > 0.6) {
+        if (lastId == null || lastTeam == null || lastTeam == team || ball.getSpeed() > 0.75) {
             return false;
         }
         Location carrier = participantLocation(lastId);
         return carrier != null && carrier.getWorld() == ballLoc.getWorld()
-                && Math.hypot(carrier.getX() - ballLoc.getX(), carrier.getZ() - ballLoc.getZ()) < 1.35;
+                && Math.hypot(carrier.getX() - ballLoc.getX(), carrier.getZ() - ballLoc.getZ()) < 1.9;
+    }
+
+    /** Kill a high or bouncing ball into the feet instead of heading it away. */
+    private void cushionToFeet(MatchBot bot, Location ballLoc, SoccerPlayer sp) {
+        ball.haltMotion();
+        Vector dir = bot.getFacing();
+        if (dir.lengthSquared() < 1.0e-6) {
+            dir = new Vector(0, 0, 1);
+        }
+        ball.applyImpulse(dir.normalize().multiply(0.08), null);
+        touchBall(bot.getUuid(), sp.getTeam());
+        sp.addTouch();
+        bot.markControl(matchTick);
+        bot.markCarryTouch(matchTick);
+        bot.setActionCooldown(2);
+    }
+
+    private boolean oppGoalWithin(TeamSide team, Location loc, double blocks) {
+        Cuboid goal = arena.getGoal(team.opposite());
+        if (goal == null || loc == null) {
+            return false;
+        }
+        Location center = goal.getCenter();
+        return Math.hypot(loc.getX() - center.getX(), loc.getZ() - center.getZ()) < blocks;
     }
 
     /**
@@ -3311,7 +3465,14 @@ public final class Game {
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
 
         if (settings.botCloseControl && height > 1.15) {
-            headBall(bot, ballLoc, speed, quality);
+            boolean attackHeader = teamBall && oppGoalWithin(sp.getTeam(), ballLoc, 9.0)
+                    && rnd.nextDouble() < 0.25;
+            boolean clearance = !teamBall && keeperZone;
+            if (attackHeader || clearance) {
+                headBall(bot, ballLoc, speed, quality);
+            } else {
+                cushionToFeet(bot, ballLoc, sp);
+            }
             return;
         }
         if (settings.botCloseControl && teamBall && height < 0.9 && firstTimeFinish(bot, ballLoc, speed, quality)) {
@@ -3337,9 +3498,9 @@ public final class Game {
             if (out.lengthSquared() < 1.0e-6) {
                 out = bot.getFacing();
             }
-            double spread = (rnd.nextDouble() * 2.0 - 1.0) * (0.35 + 0.9 * severity);
+            double spread = (rnd.nextDouble() * 2.0 - 1.0) * (0.15 + 0.25 * severity);
             out = rotateFlat(out.normalize(), spread)
-                    .multiply(Math.max(0.14, speed * (0.22 + 0.42 * severity)));
+                    .multiply(Math.max(0.05, speed * (0.06 + 0.08 * severity)));
             ball.applyImpulse(out, null);
             bot.markControl(matchTick);
             bot.setActionCooldown(3 + (int) Math.round(severity * 6.0));
@@ -3390,11 +3551,11 @@ public final class Game {
         double goalDist = Math.hypot(ballLoc.getX() - oppGoal.getX(), ballLoc.getZ() - oppGoal.getZ());
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
         double appetite = switch (getBotDifficulty(bot.getTeam())) {
-            case EASY -> 0.3;
-            case MEDIUM -> 0.5;
-            case HARD -> 0.65;
+            case EASY -> 0.08;
+            case MEDIUM -> 0.14;
+            case HARD -> 0.22;
         };
-        if (goalDist > 11.0 || rnd.nextDouble() > appetite) {
+        if (goalDist > 8.0 || rnd.nextDouble() > appetite) {
             return false;
         }
         Location aim = BotAi.finishingAim(this, bot, ballLoc);
@@ -3419,7 +3580,7 @@ public final class Game {
         ball.applyImpulse(kick.impulse, kick.spin);
         touchBall(bot.getUuid(), sp.getTeam());
         sp.addTouch();
-        sp.addShot();
+        registerShot(sp);
         markBotKick(bot);
         beginBotOffsidePhase(bot);
         bot.swingArm();
@@ -3456,7 +3617,7 @@ public final class Game {
         touchBall(bot.getUuid(), sp.getTeam());
         sp.addTouch();
         if (atGoal) {
-            sp.addShot();
+            registerShot(sp);
         }
         markBotKick(bot);
         beginBotOffsidePhase(bot);
@@ -3476,9 +3637,9 @@ public final class Game {
         }
         Location ballLoc = ball.getLocation();
         Location feet = bot.getLocation();
-        if (ballLoc == null || feet == null || ball.getSpeed() > 0.55
-                || Math.hypot(feet.getX() - ballLoc.getX(), feet.getZ() - ballLoc.getZ()) > 1.7
-                || ballLoc.getY() - feet.getY() > 0.9) {
+        if (ballLoc == null || feet == null || ball.getSpeed() > 1.2
+                || Math.hypot(feet.getX() - ballLoc.getX(), feet.getZ() - ballLoc.getZ()) > 2.2
+                || ballLoc.getY() - feet.getY() > 1.1) {
             return false;
         }
         Vector dir = direction.clone().setY(0);
@@ -3489,20 +3650,18 @@ public final class Game {
             return false;
         }
         dir.normalize();
-        int ticks = Math.max(3, touchTicks);
-        double friction = Math.max(0.5, Math.min(0.99, settings.groundFriction));
-        Location aim = feet.clone().add(dir.multiply(Math.max(0.0, runSpeed) * ticks + lead));
-        Vector delta = aim.toVector().subtract(ballLoc.toVector()).setY(0);
-        double travel = delta.length();
-        if (travel < 0.05) {
-            return false;
+        // Stay on the foot at the runner's own pace. A tiny nudge is what let
+        // the ball slip away as soon as the bot tried to run at goal.
+        glueBallToFeet(feet, dir, Math.min(0.34, Math.max(0.0, runSpeed)));
+        boolean alreadyMine = bot.getUuid().equals(ball.getLastTouchId());
+        if (!alreadyMine) {
+            touchBall(bot.getUuid(), bot.getTeam());
+            bot.getProfile().addTouch();
+        } else if (matchTick % 20 == 0) {
+            bot.getProfile().addTouch();
         }
-        double v0 = travel * (1.0 - friction) / (1.0 - Math.pow(friction, ticks));
-        v0 = Math.max(0.06, Math.min(0.62, v0));
-        ball.haltMotion();
-        ball.applyImpulse(delta.multiply(v0 / travel), null);
-        touchBall(bot.getUuid(), bot.getTeam());
-        bot.getProfile().addTouch();
+        bot.getProfile().tickDribbleChallenge(
+                countOpponentsNear(bot.getTeam(), ballLoc, 3.0) > 0, matchTick);
         bot.markCarryTouch(matchTick);
         return true;
     }
@@ -3545,7 +3704,7 @@ public final class Game {
             double control = carrierBot != null
                     ? 0.45 + carrierBot.composure() * 0.2 + carrierBot.agility() * 0.05
                     + difficultyEdge(carrierBot.getTeam())
-                    : 0.58;
+                    : 0.46;
             double gap = Math.hypot(carrierLoc.getX() - ballLoc.getX(), carrierLoc.getZ() - ballLoc.getZ());
             chance = 0.5 + (tackling - control) + Math.max(0.0, gap - 0.7) * 0.35;
             Vector carrierRun = carrierBot != null ? carrierBot.getVelocity() : carrierLoc.getDirection();
@@ -3577,11 +3736,18 @@ public final class Game {
         if (poke.lengthSquared() < 1.0e-6) {
             poke = tackler.getFacing();
         }
-        double power = contested ? 0.26 + rnd.nextDouble() * 0.14 : 0.16;
+        double power = contested ? 0.12 + rnd.nextDouble() * 0.06 : 0.1;
         ball.haltMotion();
-        ball.applyImpulse(rotateFlat(poke.normalize(), (rnd.nextDouble() - 0.5) * 0.5).multiply(power), null);
-        touchBall(tackler.getUuid(), tackler.getTeam());
+        ball.applyImpulse(rotateFlat(poke.normalize(), (rnd.nextDouble() - 0.5) * 0.35).multiply(power), null);
+        suppressClaimStats = true;
+        try {
+            touchBall(tackler.getUuid(), tackler.getTeam());
+        } finally {
+            suppressClaimStats = false;
+        }
         sp.addTouch();
+        sp.addTackleWon();
+        noteClearance(sp, ballLoc);
         tackler.markControl(matchTick);
         tackler.markCarryTouch(matchTick);
         tackler.swingArm();
@@ -3650,7 +3816,7 @@ public final class Game {
     private void beginKeeperHold(MatchBot keeper, boolean countSave) {
         SoccerPlayer sp = keeper.getProfile();
         keeperHolderId = keeper.getUuid();
-        keeperHoldTicks = 36 + ThreadLocalRandom.current().nextInt(30);
+        keeperHoldTicks = 6;
         ball.haltMotion();
         touchBall(keeper.getUuid(), sp.getTeam());
         sp.addTouch();
@@ -3716,6 +3882,7 @@ public final class Game {
     /** Rolls it out to a nearby team-mate, throws it, or punts it up the field. */
     private void goalkeeperDistribute(MatchBot keeper) {
         releaseKeeperHold(true);
+        markKeeperRelease(keeper);
         if (ball == null || keeper.getLocation() == null
                 || (state != GameState.PLAYING && state != GameState.EXTRA_TIME)) {
             return;
@@ -3727,25 +3894,31 @@ public final class Game {
             target = midfieldClearanceTarget(hands);
         }
         double dist = Math.hypot(target.getX() - hands.getX(), target.getZ() - hands.getZ());
-        Location from = hands;
+        if (dist < 12.0) {
+            Location clearance = BotAi.keeperClearanceTarget(this, keeper);
+            if (clearance != null) {
+                target = clearance;
+                dist = Math.hypot(target.getX() - hands.getX(), target.getZ() - hands.getZ());
+            }
+        }
         double power;
         double lift;
         if (dist <= 15.0) {
-            from = keeper.getLocation().clone().add(keeper.getFacing().multiply(0.7));
-            from.setY(keeper.getLocation().getY() + 0.3);
-            ball.teleport(from);
-            power = groundPassFraction(dist);
-            lift = 0.0;
+            power = Math.max(0.5, groundPassFraction(dist));
+            lift = 0.2;
         } else if (dist <= 26.0) {
-            power = Math.max(0.2, Math.min(0.7, groundPassFraction(dist) * 0.9));
-            lift = 0.16;
+            power = Math.max(0.55, Math.min(0.8, groundPassFraction(dist)));
+            lift = 0.28;
         } else {
             power = 0.95;
             lift = 0.46;
         }
         keeper.faceLocation(target);
+        Location from = launchPoint(hands, target, keeper.getLocation().getY() + 1.15, 1.8);
+        ball.teleport(from);
+        ball.setFrozen(false);
         Mechanics.Kick kick = Mechanics.computeBotShotToward(from, target, settings, power, lift);
-        ball.applyImpulse(kick.impulse, kick.spin);
+        ball.applyKick(kick.impulse, kick.spin, true);
         touchBall(keeper.getUuid(), sp.getTeam());
         sp.addTouch();
         registerPass(sp);
@@ -3757,6 +3930,28 @@ public final class Game {
         if (loc != null && loc.getWorld() != null) {
             loc.getWorld().playSound(loc, Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.9f, lift > 0.3 ? 0.8f : 1.1f);
         }
+    }
+
+    /** Puts the ball just ahead of the keeper so the throw starts outside his hands. */
+    private static Location launchPoint(Location from, Location target, double y, double ahead) {
+        Location start = from.clone();
+        Vector aim = target.toVector().subtract(from.toVector());
+        aim.setY(0);
+        if (aim.lengthSquared() > 1e-6) {
+            start.add(aim.normalize().multiply(ahead));
+        }
+        start.setY(y);
+        return start;
+    }
+
+    private void markKeeperRelease(MatchBot keeper) {
+        keeperReleaseId = keeper.getUuid();
+        keeperReleaseUntilTick = matchTick + 50;
+    }
+
+    /** True while this keeper must leave the ball he just threw. */
+    public boolean keeperJustReleased(UUID keeperId) {
+        return keeperId != null && keeperId.equals(keeperReleaseId) && matchTick < keeperReleaseUntilTick;
     }
 
     /** Power fraction for a ground ball that is still rolling when it reaches {@code distance}. */
@@ -3898,7 +4093,7 @@ public final class Game {
         markBotKick(bot);
         beginBotOffsidePhase(bot);
         if (type == BallKickEvent.KickType.SHOT) {
-            sp.addShot();
+            registerShot(sp);
         } else if (type == BallKickEvent.KickType.PASS || type == BallKickEvent.KickType.LOFT_PASS
                 || type == BallKickEvent.KickType.CROSS_PASS || type == BallKickEvent.KickType.THROW_IN) {
             registerPass(sp);
@@ -3984,6 +4179,7 @@ public final class Game {
         ball.applyImpulse(kick.impulse, kick.spin);
         sp.addTouch();
         registerPass(sp);
+        sp.addCross();
         markBotKick(bot);
         beginBotOffsidePhase(bot);
         bot.swingArm();
@@ -4048,7 +4244,7 @@ public final class Game {
         touchBall(bot.getUuid(), sp.getTeam());
         ball.applyImpulse(kick.impulse, kick.spin);
         sp.addTouch();
-        sp.addShot();
+        registerShot(sp);
         markBotKick(bot);
         beginBotOffsidePhase(bot);
         bot.swingArm();
@@ -4167,7 +4363,7 @@ public final class Game {
         touchBall(bot.getUuid(), sp.getTeam());
         ball.applyImpulse(kick.impulse, kick.spin);
         sp.addTouch();
-        sp.addShot();
+        registerShot(sp);
         markBotKick(bot);
         beginBotOffsidePhase(bot);
         bot.swingArm();
@@ -4236,7 +4432,10 @@ public final class Game {
         if (ball == null || bot.getLocation() == null || bot.getRole() != BotRole.GOALKEEPER) {
             return;
         }
-        if (!reachable(bot, Math.max(2.05, settings.kickReach * 1.15), false, 2.65)) {
+        double inbound = ball.getSpeed();
+        double reach = inbound < 0.45 ? 2.5 : (inbound > 1.05 ? 1.5 : 1.9);
+        double maxHeight = inbound < 0.45 ? 2.05 : 1.55;
+        if (!reachable(bot, reach, false, maxHeight)) {
             return;
         }
         goalkeeperGather(bot, ball.getSpeed() > 0.45, punchClear);
@@ -4254,14 +4453,14 @@ public final class Game {
             return;
         }
         if (ball == null || ball.getLocation() == null || bot.getLocation() == null
-                || bot.getRole() != BotRole.GOALKEEPER) {
+                || bot.getRole() != BotRole.GOALKEEPER || keeperJustReleased(bot.getUuid())) {
             return;
         }
         Location ballLoc = ball.getLocation();
         Location keeperLoc = bot.getLocation();
         double horiz = Math.hypot(keeperLoc.getX() - ballLoc.getX(), keeperLoc.getZ() - ballLoc.getZ());
         double vert = Math.abs(keeperLoc.getY() - ballLoc.getY());
-        if (horiz > settings.kickReach * 1.45 + 0.6 || vert > 2.7) {
+        if (horiz > 2.0 || vert > 1.7) {
             return;
         }
 
@@ -4310,7 +4509,8 @@ public final class Game {
      */
     private void goalkeeperGather(MatchBot bot, boolean countSave, boolean punchClear) {
         if (ball == null || ball.getLocation() == null || bot.getLocation() == null
-                || bot.getRole() != BotRole.GOALKEEPER) {
+                || bot.getRole() != BotRole.GOALKEEPER || keeperJustReleased(bot.getUuid())
+                || keeperHolderId != null) {
             return;
         }
         SoccerPlayer sp = bot.getProfile();
@@ -4355,10 +4555,12 @@ public final class Game {
             }
         }
 
-        Mechanics.Kick kick = Mechanics.computeBotShotToward(ballLoc, target, settings, power, lift);
+        markKeeperRelease(bot);
+        Location from = launchPoint(ballLoc, target, ballLoc.getY(), 1.8);
+        Mechanics.Kick kick = Mechanics.computeBotShotToward(from, target, settings, power, lift);
         touchBall(bot.getUuid(), sp.getTeam());
         ball.haltMotion();
-        ball.teleport(ballLoc);
+        ball.teleport(from);
         ball.applyImpulse(kick.impulse, kick.spin);
         sp.addTouch();
         registerPass(sp);
@@ -4538,6 +4740,10 @@ public final class Game {
                 throwInBoundaryGrace--;
             }
             trackPossession();
+            sampleMovement();
+            if (pendingShotId != null && matchTick - pendingShotTick > 120) {
+                resolvePendingShot(false);
+            }
         } else if (state == GameState.OFFSIDE) {
             tickOffsideRestart();
             if (autoReferee != null) {
@@ -4621,15 +4827,46 @@ public final class Game {
         }
     }
 
+    private void sampleMovement() {
+        for (SoccerPlayer sp : players.values()) {
+            if (sp.isReferee()) {
+                continue;
+            }
+            Player p = sp.getBukkitPlayer();
+            if (p != null && p.isOnline()) {
+                sp.sampleMovement(p.getLocation());
+            }
+        }
+        for (MatchBot bot : bots.values()) {
+            if (bot.getLocation() != null) {
+                bot.getProfile().sampleMovement(bot.getLocation());
+            }
+        }
+    }
+
     private void touchBall(Player player, TeamSide team) {
         touchBall(player.getUniqueId(), team);
     }
 
     private void touchBall(UUID id, TeamSide team) {
-        if (ball != null) {
-            ball.recordTouch(id, team);
+        if (ball == null) {
+            return;
         }
+        double speedBefore = ball.getSpeed();
+        TeamSide prevTeam = ball.getLastTouchTeam();
+        UUID prevId = ball.getLastTouchId();
+        ball.recordTouch(id, team);
         onBallTouched(id, team);
+        // A slow ball taken off the other team is an interception. A shot or a
+        // deflection is still moving fast, so it keeps the pass that created it.
+        if (!suppressClaimStats && prevTeam != null && prevTeam != team
+                && prevId != null && !prevId.equals(id) && speedBefore < 0.45) {
+            SoccerPlayer claimer = getPlayer(id);
+            if (claimer != null) {
+                claimer.addInterception();
+            }
+            clearAssistChain();
+        }
     }
 
     private void onBallTouched(UUID id, TeamSide team) {
@@ -4643,9 +4880,26 @@ public final class Game {
                     if (receiver != null) {
                         receiver.addPassReceived();
                     }
+                    noteKeyPass(passer);
                 }
             }
             pendingPasserId = null;
+            pendingPassStartDist = -1;
+        }
+    }
+
+    private void noteKeyPass(SoccerPlayer passer) {
+        if (passer == null || pendingPassStartDist < 0 || ball == null || ball.getLocation() == null) {
+            return;
+        }
+        Location opp = goalMouthOnPitch(passer.getTeam().opposite());
+        Location at = ball.getLocation();
+        if (opp == null || at.getWorld() == null || !at.getWorld().equals(opp.getWorld())) {
+            return;
+        }
+        double now = Math.hypot(at.getX() - opp.getX(), at.getZ() - opp.getZ());
+        if (pendingPassStartDist - now >= 8.0) {
+            passer.addKeyPass();
         }
     }
 
@@ -4664,6 +4918,175 @@ public final class Game {
     private void registerPass(SoccerPlayer sp) {
         sp.addPass();
         pendingPasserId = sp.getUuid();
+        assistFromId = sp.getUuid();
+        assistFromTeam = sp.getTeam();
+        assistFromTick = matchTick;
+        assistChancePending = true;
+        pendingPassStartDist = -1;
+        if (ball != null && ball.getLocation() != null && sp.getTeam() != null) {
+            Location opp = goalMouthOnPitch(sp.getTeam().opposite());
+            Location at = ball.getLocation();
+            if (opp != null && at.getWorld() != null && at.getWorld().equals(opp.getWorld())) {
+                pendingPassStartDist = Math.hypot(at.getX() - opp.getX(), at.getZ() - opp.getZ());
+            }
+        }
+    }
+
+    /** The passer of the last real pass, if it is recent and not the scorer. */
+    private SoccerPlayer assistForGoal(TeamSide scoringTeam, SoccerPlayer scorer) {
+        if (assistFromId == null || scorer == null || assistFromId.equals(scorer.getUuid())) {
+            return null;
+        }
+        if (assistFromTeam != scoringTeam || matchTick - assistFromTick > 200) {
+            return null;
+        }
+        return getPlayer(assistFromId);
+    }
+
+    private void clearAssistChain() {
+        assistFromId = null;
+        assistFromTeam = null;
+        assistFromTick = -10_000L;
+        assistChancePending = false;
+    }
+
+    private void clearPendingShot() {
+        pendingShotId = null;
+        pendingShotOnTarget = false;
+        pendingShotBig = false;
+        pendingShotTick = 0;
+    }
+
+    /** A shot that did not become a goal is a missed chance only if it was a real one. */
+    private void resolvePendingShot(boolean scored) {
+        if (pendingShotId == null) {
+            return;
+        }
+        if (!scored && (pendingShotOnTarget || pendingShotBig)) {
+            SoccerPlayer shooter = getPlayer(pendingShotId);
+            if (shooter != null) {
+                shooter.addChanceMissed();
+            }
+        }
+        clearPendingShot();
+    }
+
+    /**
+     * One kick, one shot. On target means the ball is actually travelling at
+     * the opponent's goal mouth, not merely that the player clicked.
+     */
+    private void registerShot(SoccerPlayer sp) {
+        if (sp == null || sp.getTeam() == null) {
+            return;
+        }
+        resolvePendingShot(false);
+        sp.addShot();
+        boolean onTarget = shotTravelsIntoGoal(sp.getTeam());
+        double goalDist = distanceToOpponentGoal(sp.getTeam());
+        boolean big = goalDist >= 0 && goalDist < 14.0 && onTarget;
+        if (onTarget) {
+            sp.addShotOnTarget();
+        } else {
+            sp.addShotOffTarget();
+        }
+        if (assistChancePending && assistFromId != null && !assistFromId.equals(sp.getUuid())
+                && assistFromTeam == sp.getTeam() && matchTick - assistFromTick <= 160
+                && (onTarget || (goalDist >= 0 && goalDist < 16.0))) {
+            SoccerPlayer creator = getPlayer(assistFromId);
+            if (creator != null) {
+                creator.addChanceCreated();
+            }
+            assistChancePending = false;
+        }
+        pendingShotId = sp.getUuid();
+        pendingShotOnTarget = onTarget;
+        pendingShotBig = big || (goalDist >= 0 && goalDist < 12.0);
+        pendingShotTick = matchTick;
+    }
+
+    private double distanceToOpponentGoal(TeamSide attacking) {
+        if (ball == null || ball.getLocation() == null || attacking == null) {
+            return -1;
+        }
+        Location mouth = goalMouthOnPitch(attacking.opposite());
+        Location at = ball.getLocation();
+        if (mouth == null || at.getWorld() == null || !at.getWorld().equals(mouth.getWorld())) {
+            return -1;
+        }
+        return Math.hypot(at.getX() - mouth.getX(), at.getZ() - mouth.getZ());
+    }
+
+    /** True when the ball's horizontal velocity is aimed inside the goal mouth. */
+    private boolean shotTravelsIntoGoal(TeamSide attacking) {
+        if (ball == null || ball.getLocation() == null || attacking == null) {
+            return false;
+        }
+        Cuboid goal = arena.getGoal(attacking.opposite());
+        Location mouth = goalMouthOnPitch(attacking.opposite());
+        Location from = ball.getLocation();
+        if (goal == null || mouth == null || from.getWorld() == null || !from.getWorld().equals(mouth.getWorld())) {
+            return false;
+        }
+        Vector velocity = ball.getVelocity();
+        velocity.setY(0);
+        if (velocity.lengthSquared() < 0.01) {
+            return false;
+        }
+        Vector toMouth = mouth.toVector().subtract(from.toVector());
+        toMouth.setY(0);
+        if (toMouth.lengthSquared() < 0.25) {
+            return true;
+        }
+        Vector dir = velocity.normalize();
+        if (dir.dot(toMouth.clone().normalize()) < 0.9) {
+            return false;
+        }
+        double along = toMouth.dot(dir);
+        if (along < 1.0) {
+            return true;
+        }
+        Vector miss = toMouth.clone().subtract(dir.clone().multiply(along));
+        double halfMouth = Math.max(goal.getSizeX(), goal.getSizeZ()) * 0.5;
+        return miss.length() <= halfMouth + 0.3;
+    }
+
+    private void noteClearance(SoccerPlayer sp, Location at) {
+        if (sp == null || sp.getTeam() == null || at == null) {
+            return;
+        }
+        Location own = goalMouthOnPitch(sp.getTeam());
+        if (own != null && at.getWorld() != null && at.getWorld().equals(own.getWorld())
+                && Math.hypot(at.getX() - own.getX(), at.getZ() - own.getZ()) <= 18.0) {
+            sp.addClearance();
+        }
+    }
+
+    /** Pulls the ball onto the foot and keeps it there at the runner's pace. */
+    private void glueBallToFeet(Location feet, Vector facing, double runSpeed) {
+        if (ball == null || ball.getLocation() == null || feet == null || facing == null) {
+            return;
+        }
+        Vector dir = facing.clone().setY(0);
+        if (dir.lengthSquared() < 1.0e-6) {
+            dir = new Vector(0, 0, 1);
+        }
+        dir.normalize();
+        Location ballLoc = ball.getLocation();
+        Location anchor = feet.clone().add(dir.clone().multiply(0.55));
+        anchor.setY(ballLoc.getY());
+        Vector toAnchor = anchor.toVector().subtract(ballLoc.toVector());
+        toAnchor.setY(0);
+        double gap = toAnchor.length();
+        double pace = Math.max(0.0, Math.min(0.34, runSpeed));
+        ball.haltMotion();
+        if (gap < 0.18) {
+            if (pace >= 0.03) {
+                ball.applyImpulse(dir.multiply(pace), null);
+            }
+            return;
+        }
+        Vector pull = toAnchor.normalize().multiply(Math.min(0.36, Math.max(pace, 0.1 + gap * 0.22)));
+        ball.applyImpulse(pull, null);
     }
 
     private void processInteractions() {
@@ -4693,41 +5116,32 @@ public final class Game {
             if (isKickTrapImmune(p.getUniqueId())) {
                 continue;
             }
-
-            boolean keeperZone = isInOwnGoalBox(sp.getTeam(), feet);
-            boolean moving = p.getVelocity().getX() * p.getVelocity().getX()
-                    + p.getVelocity().getZ() * p.getVelocity().getZ() > 0.0025;
-            boolean trap = speed > 0.12;
-            boolean dribble = speed <= 0.12 && moving;
-
-            if (!trap && !dribble) {
+            // Someone else has it on their foot. Walking into them does not steal it.
+            if (isControlledByOpponent(sp.getTeam(), ballLoc)) {
                 continue;
             }
-
+            boolean mine = p.getUniqueId().equals(ball.getLastTouchId());
+            if (mine && horiz < 1.25 && speed <= 0.5) {
+                Vector step = sp.getLastStep();
+                Vector face = step.lengthSquared() > 0.002
+                        ? step : p.getLocation().getDirection();
+                glueBallToFeet(feet, face, step.length());
+                if (matchTick % 20 == 0) {
+                    sp.addTouch();
+                }
+                sp.tickDribbleChallenge(countOpponentsNear(sp.getTeam(), ballLoc, 3.0) > 0, matchTick);
+                continue;
+            }
+            // A click is the only kick. A loose ball stops at the feet.
+            if (speed < 0.08 || speed > 0.55) {
+                continue;
+            }
             if (tryHandleOffsideTouch(p, sp.getTeam())) {
                 continue;
             }
-
-            if (trap) {
-                double contactSpeed = speed;
-                ball.haltMotion();
-                if (keeperZone && contactSpeed > 0.6) {
-                    sp.addSave();
-                    p.playSound(p.getLocation(), Sound.ENTITY_ITEM_PICKUP, 1f, 0.7f);
-                    if (crowd != null) {
-                        crowd.onSave(sp.getTeam());
-                    }
-                    p.getWorld().spawnParticle(Particle.CRIT, ballLoc, 6, 0.1, 0.1, 0.1, 0.05);
-                }
-            }
-
+            ball.haltMotion();
             touchBall(p, sp.getTeam());
             sp.addTouch();
-
-            if (moving) {
-                Vector nudge = Mechanics.dribbleNudge(p, settings);
-                ball.applyImpulse(nudge, null);
-            }
         }
     }
 
@@ -4741,8 +5155,6 @@ public final class Game {
                 p.setSprinting(false);
                 p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 30, 1, false, false));
             }
-        } else if (sp.isCharging()) {
-            sp.drainStamina(settings.chargeDrain, 0);
         } else {
             sp.regenStamina(settings.staminaRegen, settings.maxStamina);
         }
@@ -4783,7 +5195,17 @@ public final class Game {
         if (goalBox == null) {
             goalBox = arena.goalContaining(curr);
         }
+        boolean inside = arena.goalContaining(curr) != null;
+        if (awaitingKickoffAfterGoal) {
+            ballWasInsideGoal = inside;
+            return;
+        }
         if (goalBox == null) {
+            ballWasInsideGoal = false;
+            return;
+        }
+        // The ball can sit in the net for several ticks. Count the entry once.
+        if (ballWasInsideGoal) {
             return;
         }
         if (ball.isGoalScoringSuppressed(matchTick) && arena.isNearGoalFrame(curr)) {
@@ -4793,6 +5215,9 @@ public final class Game {
     }
 
     private void scoreGoal(TeamSide scoringTeam) {
+        if (awaitingKickoffAfterGoal || scoringTeam == null || ball == null) {
+            return;
+        }
         SoccerPlayer scorer = null;
         SoccerPlayer assist = null;
         boolean ownGoal = false;
@@ -4803,11 +5228,6 @@ public final class Game {
             SoccerPlayer last = getPlayer(lastId);
             if (lastTeam == scoringTeam) {
                 scorer = last;
-                UUID prevId = ball.getPrevTouchId();
-                if (prevId != null && !prevId.equals(lastId)
-                        && ball.getPrevTouchTeam() == scoringTeam) {
-                    assist = getPlayer(prevId);
-                }
             } else {
                 // Last touch was the conceding team. If the ball was previously
                 // played by the scoring team (a shot the keeper/defender only got
@@ -4830,13 +5250,23 @@ public final class Game {
             return;
         }
 
+        // Lock before the increment. A second call in the same tick, or the ball
+        // remaining in the net, cannot add another goal.
+        awaitingKickoffAfterGoal = true;
+        ballWasInsideGoal = true;
+
         if (scoringTeam == TeamSide.RED) {
             redScore++;
         } else {
             blueScore++;
         }
 
-        // Stats
+        if (!ownGoal && scorer != null) {
+            assist = assistForGoal(scoringTeam, scorer);
+        }
+        boolean shotScored = !ownGoal && scorer != null && scorer.getUuid().equals(pendingShotId);
+        resolvePendingShot(shotScored);
+
         if (scorer != null) {
             if (ownGoal) {
                 scorer.addOwnGoal();
@@ -4847,6 +5277,7 @@ public final class Game {
                 }
             }
         }
+        clearAssistChain();
 
         Bukkit.getPluginManager().callEvent(
                 new GoalScoredEvent(this, scoringTeam, scorer, assist, ownGoal));
@@ -4955,9 +5386,8 @@ public final class Game {
         if (team != null) {
             kickoffTeam = team.opposite();
         }
-        if (ball != null) {
-            ball.setFrozen(true);
-        }
+        kickoffTakerId = chooseKickoffTaker(kickoffTeam);
+        placeRestartBodies();
         Location center = arena.getBallSpawn();
         if (center != null) {
             launchFirework(center, team);
@@ -5820,7 +6250,7 @@ public final class Game {
                             clamped.setPitch(feet.getPitch());
                             player.teleport(clamped);
                         }
-                        player.setWalkSpeed(0.18f);
+                        player.setWalkSpeed(0.2f);
                     }
                 }
             }
@@ -5837,7 +6267,15 @@ public final class Game {
                     && p.getUniqueId().equals(penaltyKeeperId)) {
                 ActionBar.send(p, plugin.messages().raw(keeperKey));
             } else if (freeKickTakerId != null && p.getUniqueId().equals(freeKickTakerId)) {
-                ActionBar.send(p, plugin.messages().raw(takerKey));
+                String message = plugin.messages().raw(takerKey);
+                if (refereePenaltyRestart) {
+                    SoccerPlayer taker = players.get(p.getUniqueId());
+                    if (taker != null) {
+                        message = message + plugin.messages().raw("hud-power")
+                                + ActionBar.bar(taker.getShotPower(), 10, "&c", "&8");
+                    }
+                }
+                ActionBar.send(p, message);
             } else {
                 ActionBar.send(p, plugin.messages().format(waitKey,
                         "player", takerName, "team", teamName(freeKickTeam)));
@@ -5962,9 +6400,7 @@ public final class Game {
             return;
         }
 
-        double charge = type == BallKickEvent.KickType.LOFT_PASS
-                ? 0.0
-                : sp.chargeFraction(matchTick, settings.chargeTime * 20.0);
+        double charge = type == BallKickEvent.KickType.LOFT_PASS ? 0.0 : sp.getShotPower();
         Mechanics.Kick kick = Mechanics.compute(player, settings, BallKickEvent.KickType.SHOT, charge);
 
         BallKickEvent event = new BallKickEvent(player, ball, BallKickEvent.KickType.SHOT, kick.impulse, kick.spin);
@@ -5977,9 +6413,7 @@ public final class Game {
         ball.applyImpulse(event.getImpulse(), event.getSpin());
         ball.setFrozen(false);
         sp.addTouch();
-        sp.addShot();
-        sp.stopCharging();
-        player.setExp(0f);
+        registerShot(sp);
         player.setGlowing(false);
         endFreeKick();
 
@@ -6004,9 +6438,15 @@ public final class Game {
     // ==================================================================
 
     public void shoot(Player player) {
-        if (isPenaltyKeeper(player.getUniqueId()) && isPenaltySaveWindow()) {
-            attemptPenaltyKeeperSave(player);
-            return;
+        if (isPenaltyKeeper(player.getUniqueId())) {
+            if (isPenaltySaveWindow()) {
+                attemptPenaltyKeeperSave(player);
+                return;
+            }
+            if (isPenaltyRestart()) {
+                penaltyKeeperDive(player);
+                return;
+            }
         }
         if (state == GameState.THROW_IN) {
             performThrowIn(player, BallKickEvent.KickType.SHOT);
@@ -6122,10 +6562,7 @@ public final class Game {
         if (sp == null || ball == null || !reachable(player)) {
             return false;
         }
-        double charge = type == BallKickEvent.KickType.LOFT_PASS
-                || type == BallKickEvent.KickType.CROSS_PASS
-                ? 0.0
-                : sp.chargeFraction(matchTick, settings.chargeTime * 20.0);
+        double charge = type == BallKickEvent.KickType.SHOT ? sp.getShotPower() : 0.0;
         Mechanics.Kick kick = Mechanics.compute(player, settings, type, charge);
 
         BallKickEvent event = new BallKickEvent(player, ball, type, kick.impulse, kick.spin);
@@ -6146,15 +6583,16 @@ public final class Game {
         markReplayKickAnimation(player.getUniqueId(), type);
         sp.addTouch();
         if (type == BallKickEvent.KickType.SHOT) {
-            sp.addShot();
+            registerShot(sp);
             if (settings.staminaEnabled) {
                 sp.drainStamina(settings.chargeDrain * 4, 0);
             }
         } else {
             registerPass(sp);
+            if (type == BallKickEvent.KickType.CROSS_PASS) {
+                sp.addCross();
+            }
         }
-        sp.stopCharging();
-        player.setExp(0f);
 
         Location loc = ball.getLocation();
         float pitch = type == BallKickEvent.KickType.LOFT_PASS
@@ -6187,7 +6625,6 @@ public final class Game {
             return;
         }
         sp.setTackleCooldown(matchTick, (long) (settings.tackleCooldown * 20));
-        sp.addTackle();
         if (settings.staminaEnabled) {
             sp.drainStamina(settings.tackleDrain, 0);
         }
@@ -6200,13 +6637,26 @@ public final class Game {
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 1f, 0.9f);
 
         if (ball != null && keeperHolderId == null && reachable(player, settings.kickReach * 1.3)) {
-            Mechanics.Kick kick = Mechanics.compute(player, settings, BallKickEvent.KickType.TACKLE, 0);
-            BallKickEvent event = new BallKickEvent(player, ball,
-                    BallKickEvent.KickType.TACKLE, kick.impulse, kick.spin);
-            Bukkit.getPluginManager().callEvent(event);
-            if (!event.isCancelled()) {
-                touchBall(player, sp.getTeam());
-                ball.applyImpulse(event.getImpulse(), event.getSpin());
+            sp.addTackle();
+            Location ballLoc = ball.getLocation();
+            boolean held = ballLoc != null && isControlledByOpponent(sp.getTeam(), ballLoc);
+            double chance = held ? 0.42 : 0.88;
+            if (ThreadLocalRandom.current().nextDouble() < chance) {
+                Vector poke = player.getLocation().getDirection().clone().setY(0);
+                if (poke.lengthSquared() < 1.0e-6) {
+                    poke = new Vector(0, 0, 1);
+                }
+                ball.haltMotion();
+                ball.applyImpulse(poke.normalize().multiply(held ? 0.14 : 0.18), null);
+                suppressClaimStats = true;
+                try {
+                    touchBall(player, sp.getTeam());
+                } finally {
+                    suppressClaimStats = false;
+                }
+                sp.addTouch();
+                sp.addTackleWon();
+                noteClearance(sp, ballLoc);
             }
         }
         if (autoReferee != null) {
@@ -6214,23 +6664,26 @@ public final class Game {
         }
     }
 
-    public void setCharging(Player player, boolean charging) {
-        if (state == GameState.THROW_IN || state == GameState.OFFSIDE) {
-            return;
-        }
+    /**
+     * Shot power follows the hotbar selection immediately. Slot 1 is 10%, slot 7 is 70%.
+     */
+    public void setShotPowerFromHotbar(Player player, int slot) {
         SoccerPlayer sp = players.get(player.getUniqueId());
-        if (sp == null) {
+        if (sp == null || sp.isReferee() || sp.isSentOff()) {
             return;
         }
-        if (charging) {
-            if (player.isSprinting()) {
-                // sprint + sneak = slide tackle instead of charging
-                attemptTackle(player);
-            } else {
-                sp.startCharging(matchTick);
-            }
-        } else {
-            sp.stopCharging();
+        sp.setShotPower(SoccerPlayer.powerForHotbarSlot(slot));
+        player.setExp((float) sp.getShotPower());
+        if (state == GameState.OFFSIDE && settings.actionBarHud && freeKickTeam != null) {
+            updateOffsideActionBar();
+            return;
+        }
+        if (settings.actionBarHud) {
+            String staminaBar = ActionBar.bar(
+                    sp.getStamina() / settings.maxStamina, 10, "&a", "&7");
+            String powerBar = ActionBar.bar(sp.getShotPower(), 10, "&c", "&8");
+            ActionBar.send(player, plugin.messages().raw("hud-stamina") + staminaBar
+                    + plugin.messages().raw("hud-power") + powerBar);
         }
     }
 
@@ -6328,7 +6781,7 @@ public final class Game {
     }
 
     private int halfDurationSeconds() {
-        return Math.max(10, settings.matchDuration / Math.max(1, settings.halves));
+        return Math.max(10, configuredMatchDuration() / configuredHalves());
     }
 
     /** Elapsed match time (ascending), like a TV broadcast clock. */
@@ -6346,7 +6799,7 @@ public final class Game {
                 }
                 return base;
             case EXTRA_TIME:
-                return settings.matchDuration
+                return configuredMatchDuration()
                         + Math.max(0, settings.goldenGoalDuration - secondsRemaining);
             case HALFTIME:
                 return currentHalf * halfDuration;
@@ -6356,24 +6809,22 @@ public final class Game {
     }
 
     private void updateHud() {
-        if (state == GameState.OFFSIDE && settings.actionBarHud) {
-            return;
-        }
+        boolean offsideBar = state == GameState.OFFSIDE && settings.actionBarHud;
         for (SoccerPlayer sp : players.values()) {
             Player p = sp.getBukkitPlayer();
             if (p == null) {
                 continue;
             }
-            double charge = sp.chargeFraction(matchTick, settings.chargeTime * 20.0);
-            p.setExp((float) charge);
+            double power = sp.getShotPower();
+            p.setExp((float) power);
             p.setLevel((int) Math.round(sp.getStamina()));
 
-            if (settings.actionBarHud) {
+            if (settings.actionBarHud && !offsideBar) {
                 String staminaBar = ActionBar.bar(
                         sp.getStamina() / settings.maxStamina, 10, "&a", "&7");
-                String chargeBar = ActionBar.bar(charge, 10, "&c", "&8");
+                String powerBar = ActionBar.bar(power, 10, "&c", "&8");
                 ActionBar.send(p, plugin.messages().raw("hud-stamina") + staminaBar
-                        + plugin.messages().raw("hud-power") + chargeBar);
+                        + plugin.messages().raw("hud-power") + powerBar);
             }
         }
     }
@@ -6406,12 +6857,12 @@ public final class Game {
                     int stoppageElapsed = Math.max(0, stoppageSecondsAdded - stoppageSecondsRemaining);
                     return Text.formatTime(elapsed + stoppageElapsed)
                             + " +" + Text.formatTime(stoppageSecondsRemaining)
-                            + (settings.halves > 1
+                            + (configuredHalves() > 1
                             ? plugin.messages().format("half-suffix", "half", String.valueOf(currentHalf))
                             : "");
                 }
                 return Text.formatTime(elapsedMatchSeconds())
-                        + (settings.halves > 1
+                        + (configuredHalves() > 1
                         ? plugin.messages().format("half-suffix", "half", String.valueOf(currentHalf))
                         : "");
             case EXTRA_TIME:
@@ -6688,8 +7139,17 @@ public final class Game {
         return countTeam(team);
     }
 
+    public void setTeamCaps(int red, int blue) {
+        redTeamCap = Math.max(1, Math.min(settings.maxPlayersPerTeam, red));
+        blueTeamCap = Math.max(1, Math.min(settings.maxPlayersPerTeam, blue));
+    }
+
+    public int getTeamCap(TeamSide team) {
+        return team == TeamSide.RED ? redTeamCap : blueTeamCap;
+    }
+
     public boolean isTeamFull(TeamSide team) {
-        return countTeam(team) >= settings.maxPlayersPerTeam;
+        return countTeam(team) >= getTeamCap(team);
     }
 
     public String getTeamDisplayName(TeamSide team) {
@@ -6724,7 +7184,7 @@ public final class Game {
                 fieldPlayers++;
             }
         }
-        return fieldPlayers + bots.size() >= settings.maxPlayersPerTeam * 2;
+        return fieldPlayers + bots.size() >= redTeamCap + blueTeamCap;
     }
 
     public boolean isRefereeSlotTaken() {
@@ -6742,7 +7202,7 @@ public final class Game {
     }
 
     private String teamChat(TeamSide team) {
-        if (redNationCode != null || blueNationCode != null) {
+        if (redNationCode != null || blueNationCode != null || redClubCode != null || blueClubCode != null) {
             return getTeamKitChatColor(team);
         }
         return team == TeamSide.RED ? settings.redChatColor : settings.blueChatColor;
@@ -6837,6 +7297,8 @@ public final class Game {
     public void setNationCodes(String redCode, String blueCode) {
         this.redNationCode = redCode;
         this.blueNationCode = blueCode;
+        this.redClubCode = null;
+        this.blueClubCode = null;
         refreshKitColors();
         refreshBotKitVisuals();
         refreshHumanKitVisuals();
@@ -6848,6 +7310,24 @@ public final class Game {
 
     public String getBlueNationCode() {
         return blueNationCode;
+    }
+
+    public void setClubCodes(String redCode, String blueCode) {
+        this.redClubCode = redCode;
+        this.blueClubCode = blueCode;
+        this.redNationCode = null;
+        this.blueNationCode = null;
+        refreshKitColors();
+        refreshBotKitVisuals();
+        refreshHumanKitVisuals();
+    }
+
+    public String getRedClubCode() {
+        return redClubCode;
+    }
+
+    public String getBlueClubCode() {
+        return blueClubCode;
     }
 
     public String getChampionshipId() {

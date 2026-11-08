@@ -50,6 +50,21 @@ public final class Items {
     }
 
     /**
+     * FIFA-style flat UI button. The resource pack supplies the image for the
+     * custom model id; clients without the pack still see a named paper item.
+     */
+    public static ItemStack ui(int model, String name, String... lore) {
+        ItemStack item = named(Material.PAPER, name, lore);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.setCustomModelData(model);
+            meta.setUnbreakable(true);
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    /**
      * Build a {@link PlayerProfile} from a Base64 skin property (same format as
      * skull textures). Returns a named profile with no custom skin if decoding fails.
      */

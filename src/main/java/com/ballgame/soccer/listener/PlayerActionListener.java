@@ -14,6 +14,7 @@ import org.bukkit.event.player.PlayerAnimationEvent;
 import org.bukkit.event.player.PlayerAnimationType;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 
@@ -24,11 +25,11 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Translates raw player input into soccer actions:
  * <ul>
- *   <li>Left-click / arm swing — shoot (power scales with charge).</li>
+ *   <li>Left-click / arm swing — shoot at the power chosen with the scroll wheel.</li>
  *   <li>Right-click — pass (ground roll).</li>
  *   <li>F (swap hands) — lofted pass (5–7 blocks high).</li>
  *   <li>Q (drop item) — low cross (exactly 3 blocks high, 15–20 blocks far).</li>
- *   <li>Sneak — charge a shot; sneak while sprinting — slide tackle.</li>
+ *   <li>Hotbar slot — shot power (slot 7 is 70%). Sneak while sprinting — slide tackle.</li>
  * </ul>
  *
  * <p>On 1.21+ left-click often does not fire {@link PlayerInteractEvent}; we also
@@ -112,7 +113,27 @@ public final class PlayerActionListener implements Listener {
         if (!game.getState().acceptsPlayerKicks()) {
             return;
         }
-        game.setCharging(event.getPlayer(), event.isSneaking());
+        if (event.isSneaking() && event.getPlayer().isSprinting()) {
+            game.attemptTackle(event.getPlayer());
+        }
+    }
+
+    /**
+     * The selected hotbar slot is the shot power: key 7 selects slot 7 and sets 70%.
+     * The selection is left where the player put it.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onHotbar(PlayerItemHeldEvent event) {
+        Player player = event.getPlayer();
+        Game game = plugin.games().getGame(player);
+        if (game == null || game.isHumanReferee(player.getUniqueId())) {
+            return;
+        }
+        SoccerPlayer sp = game.getPlayer(player.getUniqueId());
+        if (sp == null || sp.isSentOff() || sp.isReferee()) {
+            return;
+        }
+        game.setShotPowerFromHotbar(player, event.getNewSlot());
     }
 
     /**

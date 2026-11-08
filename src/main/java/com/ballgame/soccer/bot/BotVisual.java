@@ -393,7 +393,7 @@ final class BotVisual {
         Location at = entity.getLocation().clone();
         at.setYaw(yaw);
         at.setPitch(0f);
-        entity.teleport(at);
+        placeEntity(entity, at);
         if (entity instanceof LivingEntity living) {
             invokeBoolean(living, "setSprinting", sprinting);
             applyVelocity(living, velocity, sprinting);
@@ -427,7 +427,7 @@ final class BotVisual {
         }
         Location at = location.clone();
         at.setPitch(backend == Backend.MANNEQUIN ? headPitch : 0f);
-        entity.teleport(at);
+        placeEntity(entity, at);
         if (entity instanceof LivingEntity living) {
             invokeBoolean(living, "setSprinting", sprinting);
             applyVelocity(living, velocity, sprinting);
@@ -550,6 +550,52 @@ final class BotVisual {
         lastPos = null;
         backend = Backend.ARMOR_STAND;
     }
+
+    /**
+     * Moves an in-world body without a teleport packet. A teleport every tick
+     * resets the client interpolation, which is the stutter on a full squad.
+     */
+    private void placeEntity(Entity entity, Location at) {
+        Location now = entity.getLocation();
+        double dx = at.getX() - now.getX();
+        double dy = at.getY() - now.getY();
+        double dz = at.getZ() - now.getZ();
+        if (dx * dx + dy * dy + dz * dz > 16.0) {
+            entity.teleport(at);
+            return;
+        }
+        try {
+            Object handle = entity.getClass().getMethod("getHandle").invoke(entity);
+            Method move = entityMoveTo;
+            if (move == null || !move.getDeclaringClass().isInstance(handle)) {
+                move = findEntityMoveTo(handle.getClass());
+                entityMoveTo = move;
+            }
+            if (move != null) {
+                move.invoke(handle, at.getX(), at.getY(), at.getZ(), at.getYaw(), at.getPitch());
+                return;
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+        entity.teleport(at);
+    }
+
+    private static Method findEntityMoveTo(Class<?> type) {
+        for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (String name : new String[] {"absMoveTo", "moveTo"}) {
+                try {
+                    Method m = c.getDeclaredMethod(name,
+                            double.class, double.class, double.class, float.class, float.class);
+                    m.setAccessible(true);
+                    return m;
+                } catch (NoSuchMethodException ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Method entityMoveTo;
 
     private static void invokeBoolean(LivingEntity living, String method, boolean value) {
         try {

@@ -13,6 +13,7 @@ import com.ballgame.soccer.config.SoccerSettings;
 import com.ballgame.soccer.championship.ChampionshipManager;
 import com.ballgame.soccer.championship.ChampionshipType;
 import com.ballgame.soccer.fifa.FifaCatalog;
+import com.ballgame.soccer.fifa.FifaClubCatalog;
 import com.ballgame.soccer.crowd.CrowdResourcePack;
 import com.ballgame.soccer.game.GameManager;
 import com.ballgame.soccer.listener.NetworkPlayerListener;
@@ -21,12 +22,14 @@ import com.ballgame.soccer.listener.BallProtectionListener;
 import com.ballgame.soccer.listener.ChampionshipGuiListener;
 import com.ballgame.soccer.listener.ChampionshipRenameListener;
 import com.ballgame.soccer.listener.CrowdPackListener;
+import com.ballgame.soccer.listener.HubListener;
 import com.ballgame.soccer.listener.PlayerActionListener;
 import com.ballgame.soccer.listener.PlayerRefereeListener;
 import com.ballgame.soccer.listener.PlayerConnectionListener;
 import com.ballgame.soccer.stats.LeaderboardBroadcaster;
 import com.ballgame.soccer.stats.StatsManager;
 import com.ballgame.soccer.history.MatchHistoryManager;
+import com.ballgame.soccer.setup.MatchSetupManager;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -46,7 +49,10 @@ public final class SoccerPlugin extends JavaPlugin {
     private MatchHistoryManager matchHistoryManager;
     private ChampionshipManager championshipManager;
     private FifaCatalog fifaCatalog;
+    private FifaClubCatalog fifaClubCatalog;
     private CrowdResourcePack crowdPack;
+    private HubListener hubListener;
+    private MatchSetupManager matchSetupManager;
     private NetworkManager networkManager;
     private LeaderboardBroadcaster leaderboardBroadcaster;
     private BukkitTask autoSaveTask;
@@ -75,6 +81,8 @@ public final class SoccerPlugin extends JavaPlugin {
 
         this.fifaCatalog = new FifaCatalog(this);
         this.fifaCatalog.load();
+        this.fifaClubCatalog = new FifaClubCatalog(this);
+        this.fifaClubCatalog.load();
 
         this.championshipManager = new ChampionshipManager(this);
         this.championshipManager.load();
@@ -84,6 +92,8 @@ public final class SoccerPlugin extends JavaPlugin {
 
         this.gameManager = new GameManager(this);
         this.gameManager.start();
+        this.matchSetupManager = new MatchSetupManager(this);
+        this.hubListener = new HubListener(this);
         scheduleOrphanBallCleanup();
 
         this.leaderboardBroadcaster = new LeaderboardBroadcaster(this);
@@ -150,9 +160,22 @@ public final class SoccerPlugin extends JavaPlugin {
         if (fifaCatalog != null) {
             fifaCatalog.load();
         }
+        if (fifaClubCatalog != null) {
+            fifaClubCatalog.reload();
+        }
         if (leaderboardBroadcaster != null) {
             leaderboardBroadcaster.restart();
         }
+        logMatchClock();
+    }
+
+    /** What the clock will actually use, and which file it was read from. */
+    public void logMatchClock() {
+        int halves = Math.max(1, settings.halves);
+        int halfSeconds = Math.max(10, settings.matchDuration / halves);
+        getLogger().info("Match length " + (halfSeconds * halves) + "s ("
+                + halves + " halves x " + halfSeconds + "s). File: "
+                + new java.io.File(getDataFolder(), "config.yml").getAbsolutePath());
     }
 
     private void registerListeners() {
@@ -160,6 +183,7 @@ public final class SoccerPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new PlayerRefereeListener(this), this);
         getServer().getPluginManager().registerEvents(new BallProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
+        getServer().getPluginManager().registerEvents(hubListener, this);
         getServer().getPluginManager().registerEvents(new NetworkPlayerListener(this), this);
         getServer().getPluginManager().registerEvents(new ChampionshipGuiListener(), this);
         getServer().getPluginManager().registerEvents(new ChampionshipRenameListener(this), this);
@@ -237,6 +261,18 @@ public final class SoccerPlugin extends JavaPlugin {
 
     public FifaCatalog fifaCatalog() {
         return fifaCatalog;
+    }
+
+    public FifaClubCatalog clubCatalog() {
+        return fifaClubCatalog;
+    }
+
+    public HubListener hubListener() {
+        return hubListener;
+    }
+
+    public MatchSetupManager matchSetup() {
+        return matchSetupManager;
     }
 
     public CrowdResourcePack crowdPack() {

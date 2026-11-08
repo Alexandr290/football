@@ -7,9 +7,9 @@ public enum FixtureState {
 
     public String display() {
         return switch (this) {
-            case PENDING -> "Scheduled";
-            case LIVE -> "Live";
-            case COMPLETED -> "Full Time";
+            case PENDING -> "Запланирован";
+            case LIVE -> "Идёт";
+            case COMPLETED -> "Завершён";
         };
     }
 }

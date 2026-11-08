@@ -273,11 +273,16 @@ public final class Mechanics {
         if (flat.lengthSquared() < 1.0e-6) {
             flat = new Vector(0, 0, 1);
         }
+        double dist = flat.length();
         flat.normalize();
+        double friction = Math.max(0.8, Math.min(0.98, s.groundFriction));
+        // Die just short of the receiver so the pass is taken, not smashed on.
+        double desiredTravel = Math.max(3.2, dist * 0.9);
+        double power = desiredTravel * (1.0 - friction);
+        double bias = 0.85 + 0.25 * Math.max(0.4, Math.min(1.2, s.passPowerMultiplier));
         double frac = Math.max(0.0, Math.min(1.0, chargeFraction));
-        double power = (s.lightTouchPower
-                + (s.maxShotPower - s.lightTouchPower) * 0.40 * frac)
-                * s.passPowerMultiplier;
+        power *= bias * (0.92 + 0.12 * frac);
+        power = Math.max(0.18, Math.min(1.55, power));
         return new Kick(flat.clone().multiply(power), new Vector(0, 0, 0));
     }
 

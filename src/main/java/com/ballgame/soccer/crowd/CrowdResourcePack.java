@@ -24,8 +24,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Builds the stadium crowd resource pack. By default uses {@link CrowdPackMode#MANUAL}:
- * no HTTP server, no download prompts — players install the zip locally once.
+ * Builds one required AdvancedSoccer pack: stadium audio plus the FIFA-style UI.
  */
 public final class CrowdResourcePack {
 
@@ -34,8 +33,8 @@ public final class CrowdResourcePack {
             "goal_cheer", "applause", "gasp", "stinger", "kickoff"
     };
 
-    private static final String PACK_PATH = "/ballgame-crowd-pack.zip";
-    private static final String INSTALL_NAME = "AdvancedSoccer-Crowd.zip";
+    private static final String PACK_PATH = "/advanced-soccer-pack.zip";
+    private static final String INSTALL_NAME = "AdvancedSoccer-UI.zip";
 
     private final SoccerPlugin plugin;
     private final Set<UUID> accepted = ConcurrentHashMap.newKeySet();
@@ -58,11 +57,6 @@ public final class CrowdResourcePack {
         activePort = 0;
         installCopy = null;
 
-        if (!plugin.settings().crowdRealSounds) {
-            plugin.getLogger().info("Real crowd sounds disabled — using vanilla ambience only.");
-            return;
-        }
-
         try {
             packFile = buildPack();
             installCopy = copyForManualInstall(packFile);
@@ -77,8 +71,11 @@ public final class CrowdResourcePack {
         plugin.getLogger().info("Manual install file: " + installCopy.getAbsolutePath());
 
         switch (mode) {
-            case MANUAL -> plugin.getLogger().info("No network needed — enable "
-                    + INSTALL_NAME + " in Minecraft Options > Resource Packs.");
+            case MANUAL -> {
+                plugin.getLogger().warning("Manual crowd-pack mode is overridden because "
+                        + "the AdvancedSoccer UI pack is required.");
+                startRequiredDistribution();
+            }
             case URL -> startUrlMode();
             case DOWNLOAD -> startDownloadMode();
             default -> {
@@ -91,11 +88,7 @@ public final class CrowdResourcePack {
     }
 
     public void offer(Player player) {
-        if (!plugin.settings().crowdPackPromptOnJoin) {
-            return;
-        }
-        if (!isReady() || plugin.settings().crowdPackMode != CrowdPackMode.DOWNLOAD
-                && plugin.settings().crowdPackMode != CrowdPackMode.URL) {
+        if (!isReady()) {
             return;
         }
 
@@ -105,11 +98,24 @@ public final class CrowdResourcePack {
             return;
         }
 
-        plugin.getLogger().info("Offering crowd pack to " + player.getName() + ": " + url);
-        if (plugin.settings().crowdPackUseHash && sha1Hash != null) {
-            player.setResourcePack(url, sha1Hash);
-        } else {
-            player.setResourcePack(url);
+        plugin.getLogger().info("Offering required AdvancedSoccer UI pack to "
+                + player.getName() + ": " + url);
+        byte[] hash = plugin.settings().crowdPackUseHash && sha1Hash != null
+                ? sha1Hash : new byte[20];
+        try {
+            // Spigot 1.20+ required-pack overload. Reflection keeps older
+            // compatible servers able to load the plugin.
+            Player.class.getMethod("setResourcePack",
+                            String.class, byte[].class, String.class, boolean.class)
+                    .invoke(player, url, hash,
+                            "Пакет звуков стадиона AdvancedSoccer. Игра доступна и без него.",
+                            false);
+        } catch (ReflectiveOperationException ignored) {
+            if (plugin.settings().crowdPackUseHash && sha1Hash != null) {
+                player.setResourcePack(url, sha1Hash);
+            } else {
+                player.setResourcePack(url);
+            }
         }
     }
 
@@ -148,6 +154,10 @@ public final class CrowdResourcePack {
 
     public void markAccepted(Player player) {
         accepted.add(player.getUniqueId());
+    }
+
+    public boolean hasAccepted(Player player) {
+        return player != null && accepted.contains(player.getUniqueId());
     }
 
     public void markDeclined(Player player) {
@@ -200,8 +210,8 @@ public final class CrowdResourcePack {
     private void startUrlMode() {
         String externalUrl = plugin.settings().crowdPackUrl;
         if (externalUrl == null || externalUrl.isBlank()) {
-            plugin.getLogger().warning("crowd.resource-pack.mode is url but url is empty — "
-                    + "falling back to manual install.");
+            plugin.getLogger().warning("Resource-pack URL is empty; serving the required UI pack locally.");
+            startHttpServer();
             return;
         }
         configuredUrl = externalUrl.trim();
@@ -215,11 +225,17 @@ public final class CrowdResourcePack {
             plugin.getLogger().info("Crowd resource pack URL: " + configuredUrl);
             return;
         }
-        if (plugin.settings().crowdPackAutoServe) {
-            startHttpServer();
-        } else {
-            plugin.getLogger().warning("Download mode needs auto-serve: true or a url set.");
+        startHttpServer();
+    }
+
+    private void startRequiredDistribution() {
+        String externalUrl = plugin.settings().crowdPackUrl;
+        if (externalUrl != null && !externalUrl.isBlank()) {
+            configuredUrl = externalUrl.trim();
+            plugin.getLogger().info("Required UI pack URL: " + configuredUrl);
+            return;
         }
+        startHttpServer();
     }
 
     private void startHttpServer() {
@@ -303,18 +319,35 @@ public final class CrowdResourcePack {
     }
 
     private File buildPack() throws IOException {
-        File out = new File(plugin.getDataFolder(), "ballgame-crowd-pack.zip");
+        File out = new File(plugin.getDataFolder(), "advanced-soccer-pack.zip");
         if (!plugin.getDataFolder().exists()) {
             plugin.getDataFolder().mkdirs();
         }
 
         try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(out.toPath()))) {
             putResource(zip, "crowd-sounds/pack.mcmeta", "pack.mcmeta");
-            putResource(zip, "crowd-sounds/assets/ballgame/sounds.json", "assets/ballgame/sounds.json");
-            for (String name : SOUND_FILES) {
-                putResource(zip,
-                        "crowd-sounds/ogg/" + name + ".ogg",
-                        "assets/ballgame/sounds/crowd/" + name + ".ogg");
+            putResource(zip, "ui-pack/assets/minecraft/font/default.json",
+                    "assets/minecraft/font/default.json");
+            putResource(zip, "ui-pack/assets/minecraft/models/item/paper.json",
+                    "assets/minecraft/models/item/paper.json");
+            putResource(zip, "ui-pack/assets/ballgame/textures/font/fifa_dashboard.png",
+                    "assets/ballgame/textures/font/fifa_dashboard.png");
+            putResource(zip, "ui-pack/assets/ballgame/textures/item/ui_icons.png",
+                    "assets/ballgame/textures/item/ui_icons.png");
+            putResource(zip, "ui-pack/assets/ballgame/textures/item/transparent.png",
+                    "assets/ballgame/textures/item/transparent.png");
+            for (String name : new String[] {"button", "blank"}) {
+                putResource(zip, "ui-pack/assets/ballgame/models/item/" + name + ".json",
+                        "assets/ballgame/models/item/" + name + ".json");
+            }
+            if (plugin.settings().crowdRealSounds) {
+                putResource(zip, "crowd-sounds/assets/ballgame/sounds.json",
+                        "assets/ballgame/sounds.json");
+                for (String name : SOUND_FILES) {
+                    putResource(zip,
+                            "crowd-sounds/ogg/" + name + ".ogg",
+                            "assets/ballgame/sounds/crowd/" + name + ".ogg");
+                }
             }
         }
         return out;

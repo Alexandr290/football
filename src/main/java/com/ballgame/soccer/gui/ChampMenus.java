@@ -108,12 +108,12 @@ public final class ChampMenus {
                         ? Material.GOLDEN_BOOTS : Material.GOLDEN_HELMET;
                 ItemStack item = Items.named(icon,
                         "&e&l" + championship.getDisplayName(),
-                        "&7Type: &f" + typeLabel(msg, championship.getType()),
-                        "&7Status: &f" + championship.getState().display(),
-                        "&7Teams: &f" + championship.teamCount(),
-                        "&7Arena: &f" + nullOr(championship.getArenaName(), "Any"),
+                        "&7Тип: &f" + typeLabel(msg, championship.getType()),
+                        "&7Статус: &f" + championship.getState().display(),
+                        "&7Команд: &f" + championship.teamCount(),
+                        "&7Арена: &f" + nullOr(championship.getArenaName(), "Любая"),
                         "",
-                        "&aClick to open");
+                        "&aНажмите, чтобы открыть");
                 final String id = championship.getId();
                 inventory.setItem(slot, item);
                 registerClick(slot, () -> new DetailMenu(plugin, viewer, id).open());
@@ -125,6 +125,7 @@ public final class ChampMenus {
                         msg.raw("champ-gui-no-events"),
                         msg.raw("champ-gui-no-events-lore")));
             }
+            backButton(49, () -> MainHubMenu.open(plugin, viewer));
         }
 
         @Override
@@ -152,7 +153,7 @@ public final class ChampMenus {
             Messages msg = plugin.messages();
             Championship championship = plugin.championships().get(championshipId);
             if (championship == null) {
-                inventory.setItem(22, Items.named(Material.BARRIER, "&cNot found"));
+                inventory.setItem(22, Items.named(Material.BARRIER, "&cНе найдено"));
                 backButton(49, () -> openMain(plugin, viewer));
                 return;
             }
@@ -164,8 +165,8 @@ public final class ChampMenus {
             inventory.setItem(4, Items.named(Material.NETHER_STAR,
                     "&6&l" + championship.getDisplayName(),
                     "&7" + typeLabel(msg, championship.getType()) + " &8| &f" + championship.getState().display(),
-                    "&7Teams: &f" + championship.teamCount(),
-                    "&7Arena: &f" + nullOr(championship.getArenaName(), "-")));
+                    "&7Команд: &f" + championship.teamCount(),
+                    "&7Арена: &f" + nullOr(championship.getArenaName(), "-")));
 
             if ((championship.isRegistrationOpen()
                     || (plugin.settings().worldCupR16
@@ -311,7 +312,7 @@ public final class ChampMenus {
 
             inventory.setItem(31, Items.named(Material.PAPER,
                     msg.raw("champ-gui-fixtures"),
-                    "&7Pending for you: &f" + joinable.size()));
+                    "&7Доступно вам: &f" + joinable.size()));
             registerClick(31, () -> new FixturesMenu(plugin, viewer, championshipId).open());
 
             if (championship.isRegistrationOpen()
@@ -447,13 +448,13 @@ public final class ChampMenus {
             inventory.setItem(2, Items.named(Material.PAPER,
                     msg.raw("champ-table-col-pos"), "&8#"));
             inventory.setItem(3, Items.named(Material.PAPER,
-                    msg.raw("champ-table-col-team"), "&8Club"));
+                    msg.raw("champ-table-col-team"), "&8Клуб"));
             inventory.setItem(5, Items.named(Material.PAPER,
                     msg.raw("champ-table-col-stats"), "&8P W D L"));
             inventory.setItem(6, Items.named(Material.PAPER,
                     msg.raw("champ-table-col-goals"), "&8GF GA GD"));
             inventory.setItem(7, Items.named(Material.PAPER,
-                    msg.raw("champ-table-col-points"), "&8Pts"));
+                    msg.raw("champ-table-col-points"), "&8Очки"));
 
             int[] rowSlots = {19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35};
             int pos = 1;
@@ -702,7 +703,7 @@ public final class ChampMenus {
                 lore.add(Text.color("&7" + plugin.messages().raw("champ-gui-teams") + ": &f" + team.size()));
                 ChampStanding standing = championship.getStanding(team.getId());
                 if (standing != null && standing.getPlayed() > 0) {
-                    lore.add(Text.color("&7Pts: &e" + standing.getPoints()));
+                    lore.add(Text.color("&7Очки: &e" + standing.getPoints()));
                 }
                 meta.setLore(lore);
                 head.setItemMeta(meta);
@@ -763,20 +764,20 @@ public final class ChampMenus {
                     meta.setDisplayName(Text.color("&b&l" + team.getName()
                             + (team.isEliminated() ? " &c(OUT)" : "")));
                     List<String> lore = new ArrayList<>();
-                    lore.add(Text.color("&7Members: &f" + team.size()));
-                    lore.add(Text.color("&7Captain: &f" + nameOf(team.getCaptain())));
+                    lore.add(Text.color("&7Участников: &f" + team.size()));
+                    lore.add(Text.color("&7Капитан: &f" + nameOf(team.getCaptain())));
                     boolean inThisTeam = team.contains(viewer.getUniqueId());
                     boolean canLeave = plugin.championships().canLeaveTeam(championship);
                     boolean canJoin = plugin.championships().canJoinTeam(championship);
                     if (inThisTeam && canLeave) {
                         lore.add(Text.color(""));
-                        lore.add(Text.color("&cClick to leave this team"));
+                        lore.add(Text.color("&cНажмите, чтобы выйти из команды"));
                     } else if (canJoin && !inThisTeam && !team.isEliminated()) {
                         lore.add(Text.color(""));
                         if (championship.findTeamOf(viewer.getUniqueId()) != null) {
-                            lore.add(Text.color("&eClick to switch to this team"));
+                            lore.add(Text.color("&eНажмите, чтобы перейти в эту команду"));
                         } else {
-                            lore.add(Text.color("&aClick to join this team"));
+                            lore.add(Text.color("&aНажмите, чтобы вступить в команду"));
                         }
                     }
                     meta.setLore(lore);
@@ -876,7 +877,7 @@ public final class ChampMenus {
                         ? msg.raw(fixture.getPlayoffStage().displayKey())
                         : (fixture.getRound() == 0
                         ? msg.raw("champ-gui-fixture-scheduled-label")
-                        : "&7Round: &f" + fixture.getRound());
+                        : "&7Раунд: &f" + fixture.getRound());
                 boolean canJoin = calendarReady
                         && plugin.championships().canPlayerJoinFixture(
                         championship, fixture, viewer.getUniqueId());
@@ -897,13 +898,13 @@ public final class ChampMenus {
                         (canJoin ? "&a&l" : "&e") + line,
                         roundLabel,
                         arenaLine,
-                        "&7Status: &f" + statusLine);
+                        "&7Статус: &f" + statusLine);
                 if (canJoin) {
                     boolean openJoin = plugin.championships().allowsOpenFixtureJoin(championship, fixture);
                     java.util.List<String> joinLore = new java.util.ArrayList<>(java.util.Arrays.asList(
                             roundLabel,
                             arenaLine,
-                            "&7Status: &f" + statusLine,
+                            "&7Статус: &f" + statusLine,
                             "",
                             openJoin
                                     ? msg.raw("champ-gui-fixture-open-join-lore")
@@ -920,7 +921,7 @@ public final class ChampMenus {
                     java.util.List<String> lore = new java.util.ArrayList<>(java.util.Arrays.asList(
                             roundLabel,
                             arenaLine,
-                            "&7Status: &f" + statusLine,
+                            "&7Статус: &f" + statusLine,
                             "",
                             msg.raw("champ-gui-fixture-bot-match-lore"),
                             msg.raw("champ-gui-fixture-bots-lore")));
@@ -935,7 +936,7 @@ public final class ChampMenus {
                             "&e" + line,
                             roundLabel,
                             arenaLine,
-                            "&7Status: &f" + statusLine,
+                            "&7Статус: &f" + statusLine,
                             "",
                             msg.raw("champ-gui-fixture-arena-lore"));
                 }
@@ -1045,7 +1046,7 @@ public final class ChampMenus {
                 hasTeams = true;
                 inventory.setItem(slot, Items.named(Material.BLUE_BANNER,
                         "&b&l" + team.getName(),
-                        "&7Members: &f" + team.size(),
+                        "&7Участников: &f" + team.size(),
                         "",
                         msg.raw("champ-gui-schedule-vs-team-lore")));
                 final String teamId = team.getId();
@@ -1110,7 +1111,7 @@ public final class ChampMenus {
                 inventory.setItem(slot, Items.named(Material.WHITE_BANNER,
                         "&e&l" + team.getName(),
                         "&7" + team.getNationCode(),
-                        "&7Members: &f" + team.size(),
+                        "&7Участников: &f" + team.size(),
                         "",
                         msg.raw("champ-gui-join-nation-click")));
                 final String teamId = team.getId();

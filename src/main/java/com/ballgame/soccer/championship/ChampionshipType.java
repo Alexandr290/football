@@ -5,6 +5,6 @@ public enum ChampionshipType {
     KNOCKOUT;
 
     public String display() {
-        return name().charAt(0) + name().substring(1).toLowerCase();
+        return this == LEAGUE ? "Лига" : "Плей-офф";
     }
 }

@@ -7,9 +7,13 @@ import com.ballgame.soccer.championship.ChampFixture;
 import com.ballgame.soccer.championship.ChampTeam;
 import com.ballgame.soccer.championship.Championship;
 import com.ballgame.soccer.championship.FixtureState;
+import com.ballgame.soccer.fifa.FifaClub;
 import com.ballgame.soccer.gui.QuickJoinModeMenu;
+import com.ballgame.soccer.setup.MatchSetupSession;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.WeatherType;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -34,6 +38,7 @@ public final class GameManager {
     private final SoccerPlugin plugin;
     private final Map<String, Game> gamesByArena = new HashMap<>();
     private final Map<UUID, Game> gamesByPlayer = new HashMap<>();
+    private final Map<UUID, FreeWatch> freeWatchers = new HashMap<>();
     private BukkitTask tickTask;
     private long viewerSyncCounter;
 
@@ -56,10 +61,12 @@ public final class GameManager {
             tickTask = null;
         }
         for (Game game : new ArrayList<>(gamesByArena.values())) {
+            restoreFreeWatchers(game);
             game.cleanup();
         }
         gamesByArena.clear();
         gamesByPlayer.clear();
+        freeWatchers.clear();
     }
 
     private void tickAll() {
@@ -126,6 +133,86 @@ public final class GameManager {
             }
         }
         return best;
+    }
+
+    /**
+     * Creates a private exhibition from the command-free FIFA setup lobby.
+     * Claimed slots become humans; mixed and AI modes fill all remaining club
+     * positions with the real starting-XI names from the selected catalog.
+     */
+    public Game startConfiguredMatch(MatchSetupSession session) {
+        if (session == null || !session.readyToLaunch()) {
+            return null;
+        }
+        Arena arena = plugin.arenas().get(session.getArenaName());
+        FifaClub redClub = plugin.clubCatalog().get(session.getRedClubCode());
+        FifaClub blueClub = plugin.clubCatalog().get(session.getBlueClubCode());
+        if (arena == null || !arena.isPlayable() || redClub == null || blueClub == null
+                || gamesByArena.containsKey(key(arena))) {
+            return null;
+        }
+
+        for (Map.Entry<UUID, MatchSetupSession.Claim> entry : session.getClaims().entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || !player.isOnline() || gamesByPlayer.containsKey(entry.getKey())) {
+                return null;
+            }
+        }
+
+        Game game = new Game(plugin, arena);
+        game.setSoloMatch(true);
+        game.setTeamCaps(session.getRedSize(), session.getBlueSize());
+        game.setMatchTeamNames(redClub.getNameRu(), blueClub.getNameRu());
+        game.setClubCodes(redClub.getCode(), blueClub.getCode());
+        game.setBotDifficulty(TeamSide.RED, session.getRedDifficulty());
+        game.setBotDifficulty(TeamSide.BLUE, session.getBlueDifficulty());
+        game.setMatchOptions(new MatchOptions(
+                session.getDurationSeconds(),
+                2,
+                session.getTimeOfDay().ticks(),
+                session.getWeather() == MatchSetupSession.Weather.RAIN
+                        ? WeatherType.DOWNFALL : WeatherType.CLEAR));
+        game.setBotOnlyMatch(session.getMode() == MatchSetupSession.Mode.BOTS_VS_BOTS);
+        gamesByArena.put(key(arena), game);
+
+        try {
+            for (Map.Entry<UUID, MatchSetupSession.Claim> entry : session.getClaims().entrySet()) {
+                Player player = Bukkit.getPlayer(entry.getKey());
+                MatchSetupSession.Claim claim = entry.getValue();
+                if (player == null || !game.addPlayer(player, claim.team())) {
+                    throw new IllegalStateException("Could not add claimed player");
+                }
+                gamesByPlayer.put(player.getUniqueId(), game);
+                plugin.network().clearLobbyReturn(player);
+                if (!game.claimSquadSlot(claim.team(), claim.slot(), player.getUniqueId())) {
+                    throw new IllegalStateException("Could not claim configured squad slot");
+                }
+            }
+
+            if (session.getMode() != MatchSetupSession.Mode.PLAYERS_VS_PLAYERS) {
+                game.fillFullSquadsSilently();
+            }
+            game.deployFormationLineup();
+            game.startCountdown();
+
+            for (UUID acceptedId : session.getAccepted()) {
+                if (session.claimOf(acceptedId) != null) {
+                    continue;
+                }
+                Player spectatorPlayer = Bukkit.getPlayer(acceptedId);
+                if (spectatorPlayer != null && spectatorPlayer.isOnline()) {
+                    beginFreeWatch(spectatorPlayer, game);
+                }
+            }
+            syncServerViewers();
+            return game;
+        } catch (RuntimeException ex) {
+            plugin.getLogger().warning("Could not launch configured match: " + ex.getMessage());
+            gamesByArena.remove(key(arena));
+            gamesByPlayer.values().removeIf(mapped -> mapped == game);
+            game.cleanup();
+            return null;
+        }
     }
 
     /**
@@ -829,19 +916,80 @@ public final class GameManager {
         if (spot == null) {
             return;
         }
-        Location view = spot.clone();
         for (Player online : Bukkit.getOnlinePlayers()) {
             if (gamesByPlayer.containsKey(online.getUniqueId())) {
                 continue;
             }
-            online.teleport(view);
-            online.setGameMode(org.bukkit.GameMode.SPECTATOR);
-            online.setAllowFlight(true);
-            online.setFlying(true);
             if (watchGame != null) {
-                watchGame.attachServerViewer(online);
+                beginFreeWatch(online, watchGame);
+            } else {
+                online.teleport(spot);
+                online.setGameMode(GameMode.SPECTATOR);
+                online.setAllowFlight(true);
+                online.setFlying(true);
+                online.setSpectatorTarget(null);
             }
         }
+    }
+
+    /**
+     * Lets a non-participant fly around a match and keep the main menu.
+     * The previous game mode is restored when that match ends.
+     */
+    public void beginFreeWatch(Player player, Game game) {
+        if (player == null || game == null || !player.isOnline()) {
+            return;
+        }
+        Game joined = gamesByPlayer.get(player.getUniqueId());
+        if (joined != null && joined.contains(player.getUniqueId())) {
+            return;
+        }
+        gamesByPlayer.remove(player.getUniqueId());
+        FreeWatch existing = freeWatchers.get(player.getUniqueId());
+        GameMode previous = existing != null ? existing.previousMode() : player.getGameMode();
+        freeWatchers.put(player.getUniqueId(), new FreeWatch(game, previous));
+        Location spot = resolveStadiumSpot(game.getArena());
+        if (spot != null) {
+            player.teleport(spot);
+        }
+        if (player.getGameMode() == GameMode.SPECTATOR) {
+            player.setGameMode(previous == GameMode.SPECTATOR ? GameMode.ADVENTURE : previous);
+        }
+        player.setAllowFlight(true);
+        player.setFlying(true);
+        player.setCollidable(false);
+        player.setInvulnerable(true);
+        player.setSpectatorTarget(null);
+        game.attachServerViewer(player);
+        plugin.hubListener().giveMenuButton(player);
+    }
+
+    public boolean isFreeSpectator(Player player) {
+        return player != null && freeWatchers.containsKey(player.getUniqueId());
+    }
+
+    public void restoreFreeWatchers(Game game) {
+        if (game == null) {
+            return;
+        }
+        freeWatchers.entrySet().removeIf(entry -> {
+            if (entry.getValue().game != game) {
+                return false;
+            }
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null && player.isOnline()
+                    && !gamesByPlayer.containsKey(player.getUniqueId())) {
+                player.setSpectatorTarget(null);
+                player.setCollidable(true);
+                player.setInvulnerable(false);
+                player.setGameMode(entry.getValue().previousMode);
+                boolean flight = entry.getValue().previousMode == GameMode.CREATIVE
+                        || entry.getValue().previousMode == GameMode.SPECTATOR;
+                player.setAllowFlight(flight);
+                player.setFlying(false);
+            }
+            return true;
+        });
     }
 
     public void teleportServerToStadium(Arena arena) {
@@ -884,7 +1032,11 @@ public final class GameManager {
             plugin.messages().send(player, "not-in-game");
             return;
         }
-        game.removePlayer(player, true);
+        if (game.contains(player.getUniqueId())) {
+            game.removePlayer(player, true);
+        } else {
+            game.detachServerViewer(player);
+        }
         plugin.messages().send(player, "left-game");
         plugin.network().returnToLobbyAfterLeave(player);
     }
@@ -895,6 +1047,7 @@ public final class GameManager {
         game.cleanup();
         gamesByArena.values().removeIf(g -> g == game);
         gamesByPlayer.values().removeIf(g -> g == game);
+        restoreFreeWatchers(game);
     }
 
     public Game getGame(Player player) {
@@ -920,6 +1073,10 @@ public final class GameManager {
     /** Remove a player mapping without restoring (used on disconnect handling). */
     public void forget(Player player) {
         gamesByPlayer.remove(player.getUniqueId());
+        freeWatchers.remove(player.getUniqueId());
+    }
+
+    private record FreeWatch(Game game, GameMode previousMode) {
     }
 
     private String teamDisplayName(Game game, TeamSide team) {

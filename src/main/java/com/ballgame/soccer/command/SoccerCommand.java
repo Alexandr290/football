@@ -647,7 +647,6 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
                 String url = plugin.crowdPack().sampleDownloadUrl(player);
                 plugin.messages().send(player, "crowd-pack-url", "url", url != null ? url : "n/a");
                 plugin.messages().send(player, "crowd-pack-hint");
-                plugin.crowdPack().offer(player);
             }
         }
 
@@ -670,6 +669,11 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         plugin.arenas().load();
         int removed = BallOrphanCleanup.cleanupAllArenas(plugin);
         plugin.messages().send(sender, "reload-success");
+        int halves = Math.max(1, plugin.settings().halves);
+        int halfSeconds = Math.max(10, plugin.settings().matchDuration / halves);
+        plugin.messages().sendRaw(sender, "&7Match: &f" + (halfSeconds * halves) + "s &7("
+                + halves + " x " + halfSeconds + "s). &7File: &f"
+                + new java.io.File(plugin.getDataFolder(), "config.yml").getAbsolutePath());
         if (removed > 0) {
             plugin.messages().sendRaw(sender, "&aRemoved &f" + removed + " &aorphaned ball(s) from arenas.");
         }
@@ -1008,7 +1012,7 @@ public final class SoccerCommand implements CommandExecutor, TabCompleter {
         plugin.messages().sendRaw(sender, "&f/soccer cup &7- open championships GUI");
         plugin.messages().sendRaw(sender, "&7Controls: &fLeft-click&7 shoot, &fRight-click&7 pass, "
                 + "&fF&7 loft pass (5–7 blocks), &fQ&7 low cross (3 blocks, 15–30 far), "
-                + "&fSneak&7 charge, &fSneak+Sprint&7 tackle.");
+                + "&fHotbar slot&7 = shot power (&f7&7 = 70%), &fSneak+Sprint&7 tackle.");
         if (sender.hasPermission("soccer.admin")) {
             plugin.messages().sendRaw(sender, "&c/soccer create|delete|setfield|setredgoal|setbluegoal");
             plugin.messages().sendRaw(sender, "&c/soccer setballspawn|setredspawn|setbluespawn|setlobby");

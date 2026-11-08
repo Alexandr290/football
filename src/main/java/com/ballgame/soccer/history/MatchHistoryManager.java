@@ -11,9 +11,11 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
@@ -100,9 +102,16 @@ public final class MatchHistoryManager {
             String team = sp.getTeam() == TeamSide.RED ? "RED" : "BLUE";
             participants.add(new ParticipantRecord(
                     sp.getUuid(), sp.getName(), team, sp.isBot(),
-                    sp.getGoals(), sp.getAssists(), sp.getShots(), sp.getFouls(), possPct,
+                    sp.getGoals(), sp.getAssists(), sp.getShots(),
+                    sp.getShotsOnTarget(), sp.getShotsOffTarget(),
+                    sp.getChancesCreated(), sp.getChancesMissed(),
+                    sp.getFouls(), possPct,
                     sp.getPasses(), sp.getPassesCompleted(), sp.getPassesReceived(),
-                    sp.passAccuracyPercent(), rating));
+                    sp.passAccuracyPercent(), sp.getKeyPasses(), sp.getCrosses(),
+                    sp.getTackles(), sp.getTacklesWon(), sp.getInterceptions(),
+                    sp.getDribbles(), sp.getDuelsWon(), sp.getSaves(), sp.getClearances(),
+                    sp.getTouches(), sp.getYellowCards(), sp.getOwnGoals(),
+                    sp.getDistanceCovered(), sp.getMaxSpeed(), rating));
 
             if (sp.getTeam() == TeamSide.RED) {
                 redShots += sp.getShots();
@@ -130,6 +139,25 @@ public final class MatchHistoryManager {
         List<MatchRecord> list = new ArrayList<>(cache.values());
         list.sort(Comparator.comparingLong(MatchRecord::getFinishedAt).reversed());
         return list;
+    }
+
+    public List<MatchRecord> listRecentForParticipant(UUID participantUuid, int limit) {
+        Objects.requireNonNull(participantUuid, "participantUuid");
+        if (limit <= 0) {
+            return Collections.emptyList();
+        }
+
+        String uuid = participantUuid.toString();
+        List<MatchRecord> matches = new ArrayList<>(Math.min(limit, cache.size()));
+        for (MatchRecord record : listRecent()) {
+            if (record.findParticipant(uuid) != null) {
+                matches.add(record);
+                if (matches.size() == limit) {
+                    break;
+                }
+            }
+        }
+        return Collections.unmodifiableList(matches);
     }
 
     public MatchRecord get(String id) {
@@ -170,13 +198,31 @@ public final class MatchHistoryManager {
                         p.getInt("goals", 0),
                         p.getInt("assists", 0),
                         p.getInt("shots", 0),
+                        p.getInt("shots-on-target", 0),
+                        p.getInt("shots-off-target", 0),
+                        p.getInt("chances-created", 0),
+                        p.getInt("chances-missed", 0),
                         p.getInt("fouls", 0),
                         p.getInt("possession-pct", 0),
                         p.getInt("passes", 0),
                         p.getInt("passes-completed", 0),
                         p.getInt("passes-received", 0),
                         p.getInt("pass-accuracy-pct", 0),
-                        p.getDouble("rating", 5.0)));
+                        p.getInt("key-passes", 0),
+                        p.getInt("crosses", 0),
+                        p.getInt("tackles", 0),
+                        p.getInt("tackles-won", 0),
+                        p.getInt("interceptions", 0),
+                        p.getInt("dribbles", 0),
+                        p.getInt("duels-won", 0),
+                        p.getInt("saves", 0),
+                        p.getInt("clearances", 0),
+                        p.getInt("touches", 0),
+                        p.getInt("yellow-cards", 0),
+                        p.getInt("own-goals", 0),
+                        p.getDouble("distance", 0.0),
+                        p.getDouble("max-speed", 0.0),
+                        p.getDouble("rating", 6.2)));
             }
         }
         return new MatchRecord(
@@ -225,12 +271,30 @@ public final class MatchHistoryManager {
             ps.set("goals", p.getGoals());
             ps.set("assists", p.getAssists());
             ps.set("shots", p.getShots());
+            ps.set("shots-on-target", p.getShotsOnTarget());
+            ps.set("shots-off-target", p.getShotsOffTarget());
+            ps.set("chances-created", p.getChancesCreated());
+            ps.set("chances-missed", p.getChancesMissed());
             ps.set("fouls", p.getFouls());
             ps.set("possession-pct", p.getPossessionPct());
             ps.set("passes", p.getPasses());
             ps.set("passes-completed", p.getPassesCompleted());
             ps.set("passes-received", p.getPassesReceived());
             ps.set("pass-accuracy-pct", p.getPassAccuracyPct());
+            ps.set("key-passes", p.getKeyPasses());
+            ps.set("crosses", p.getCrosses());
+            ps.set("tackles", p.getTackles());
+            ps.set("tackles-won", p.getTacklesWon());
+            ps.set("interceptions", p.getInterceptions());
+            ps.set("dribbles", p.getDribbles());
+            ps.set("duels-won", p.getDuelsWon());
+            ps.set("saves", p.getSaves());
+            ps.set("clearances", p.getClearances());
+            ps.set("touches", p.getTouches());
+            ps.set("yellow-cards", p.getYellowCards());
+            ps.set("own-goals", p.getOwnGoals());
+            ps.set("distance", p.getDistance());
+            ps.set("max-speed", p.getMaxSpeed());
             ps.set("rating", p.getRating());
         }
     }

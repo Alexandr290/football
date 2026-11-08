@@ -1,0 +1,17 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "minecraft:item/paper"
+  },
+  "overrides": [
+    {"predicate": {"custom_model_data": 1001}, "model": "ballgame:item/button"},
+    {"predicate": {"custom_model_data": 1002}, "model": "ballgame:item/button"},
+    {"predicate": {"custom_model_data": 1003}, "model": "ballgame:item/button"},
+    {"predicate": {"custom_model_data": 1004}, "model": "ballgame:item/button"},
+    {"predicate": {"custom_model_data": 1005}, "model": "ballgame:item/button"},
+    {"predicate": {"custom_model_data": 1006}, "model": "ballgame:item/button"},
+    {"predicate": {"custom_model_data": 1007}, "model": "ballgame:item/button"},
+    {"predicate": {"custom_model_data": 1098}, "model": "ballgame:item/button"},
+    {"predicate": {"custom_model_data": 1099}, "model": "ballgame:item/blank"}
+  ]
+}

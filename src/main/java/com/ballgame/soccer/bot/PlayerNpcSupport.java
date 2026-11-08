@@ -377,6 +377,9 @@ final class PlayerNpcSupport {
         private double lastSentX;
         private double lastSentY;
         private double lastSentZ;
+        private float lastSentYaw;
+        private float lastHeadYaw = 720f;
+        private boolean sendHeadThisTick;
         private boolean hasSentPosition;
         private boolean sprinting;
         private boolean dataDirty = true;
@@ -515,20 +518,56 @@ final class PlayerNpcSupport {
             Set<UUID> stillVisible = new HashSet<>();
             Object metadata = dataDirty ? buildMetadataPacket() : null;
             dataDirty = false;
+            boolean moved = false;
+            sendHeadThisTick = Math.abs(wrapYaw(yaw - lastHeadYaw)) >= 4f;
+            boolean snap = hasSentPosition && location != null && (
+                    (location.getX() - lastSentX) * (location.getX() - lastSentX)
+                            + (location.getY() - lastSentY) * (location.getY() - lastSentY)
+                            + (location.getZ() - lastSentZ) * (location.getZ() - lastSentZ) > 16.0);
+            if (snap) {
+                for (Player viewer : nearby) {
+                    stillVisible.add(viewer.getUniqueId());
+                    if (viewers.contains(viewer.getUniqueId())) {
+                        sendDespawn(viewer);
+                    } else {
+                        viewers.add(viewer.getUniqueId());
+                    }
+                    sendSpawn(viewer);
+                }
+                lastSentX = location.getX();
+                lastSentY = location.getY();
+                lastSentZ = location.getZ();
+                lastSentYaw = yaw;
+                lastHeadYaw = yaw;
+                hasSentPosition = true;
+            }
             for (Player viewer : nearby) {
+                if (snap) {
+                    continue;
+                }
                 stillVisible.add(viewer.getUniqueId());
                 if (!viewers.contains(viewer.getUniqueId())) {
                     sendSpawn(viewer);
                     viewers.add(viewer.getUniqueId());
-                } else {
-                    sendMove(viewer, yaw);
-                    if (metadata != null) {
-                        try {
-                            send(viewer, metadata);
-                        } catch (ReflectiveOperationException ignored) {
-                        }
+                } else if (sendMove(viewer, yaw)) {
+                    moved = true;
+                }
+                if (metadata != null && viewers.contains(viewer.getUniqueId())) {
+                    try {
+                        send(viewer, metadata);
+                    } catch (ReflectiveOperationException ignored) {
                     }
                 }
+            }
+            if (moved && location != null) {
+                lastSentX = location.getX();
+                lastSentY = location.getY();
+                lastSentZ = location.getZ();
+                lastSentYaw = yaw;
+                if (sendHeadThisTick) {
+                    lastHeadYaw = yaw;
+                }
+                hasSentPosition = true;
             }
             if (!viewers.isEmpty()) {
                 List<UUID> gone = new ArrayList<>();
@@ -733,31 +772,48 @@ final class PlayerNpcSupport {
             return null;
         }
 
-        private void sendMove(Player viewer, float yaw) {
+        /**
+         * Relative move when the step is small — a teleport every tick makes a full
+         * squad look like it is stuttering. Returns false when nothing was sent.
+         */
+        private boolean sendMove(Player viewer, float yaw) {
             try {
                 if (location == null) {
-                    return;
+                    return false;
                 }
-                boolean moved = false;
-                try {
-                    moved = sendPositionPacket(viewer, yaw);
-                } catch (ReflectiveOperationException primary) {
-                    LOG.fine("[AdvancedSoccer] NPC teleport packet failed: " + primary.getMessage());
+                double dx = location.getX() - lastSentX;
+                double dy = location.getY() - lastSentY;
+                double dz = location.getZ() - lastSentZ;
+                float yawDelta = Math.abs(wrapYaw(yaw - lastSentYaw));
+                boolean tiny = dx * dx + dy * dy + dz * dz < 0.0008 && yawDelta < 8f;
+                if (hasSentPosition && tiny) {
+                    return false;
                 }
-                if (!moved && movePosRotCtor != null && hasSentPosition) {
+                boolean relative = hasSentPosition && movePosRotCtor != null
+                        && Math.abs(dx) <= 7.5 && Math.abs(dy) <= 7.5 && Math.abs(dz) <= 7.5;
+                if (relative) {
                     sendRelativeMove(viewer, yaw);
-                    moved = true;
+                } else if (!sendPositionPacket(viewer, yaw)) {
+                    return false;
                 }
-                if (moved) {
-                    lastSentX = location.getX();
-                    lastSentY = location.getY();
-                    lastSentZ = location.getZ();
-                    hasSentPosition = true;
+                if (sendHeadThisTick) {
+                    sendHeadRotation(viewer, yaw);
                 }
-                sendHeadRotation(viewer, yaw);
+                return true;
             } catch (ReflectiveOperationException ex) {
                 LOG.fine("[AdvancedSoccer] NPC move packet failed: " + ex.getMessage());
+                return false;
             }
+        }
+
+        private static float wrapYaw(float delta) {
+            while (delta > 180f) {
+                delta -= 360f;
+            }
+            while (delta < -180f) {
+                delta += 360f;
+            }
+            return delta;
         }
 
         private boolean sendPositionPacket(Player viewer, float yaw) throws ReflectiveOperationException {

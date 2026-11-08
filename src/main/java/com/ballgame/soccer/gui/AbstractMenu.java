@@ -58,15 +58,29 @@ public abstract class AbstractMenu implements InventoryHolder {
     protected void fillBorder(Material material) {
         ItemStack pane = Items.named(material, " ");
         int size = inventory.getSize();
-        for (int i = 0; i < size; i++) {
-            if (i < 9 || i >= size - 9 || i % 9 == 0 || i % 9 == 8) {
-                inventory.setItem(i, pane);
+        int rows = size / 9;
+        for (int slot = 0; slot < size; slot++) {
+            int row = slot / 9;
+            int column = slot % 9;
+            if (row == 0 || row == rows - 1 || column == 0 || column == 8) {
+                inventory.setItem(slot, pane);
             }
         }
     }
 
+    protected void fillDashboard() {
+        fillBorder(Material.GRAY_STAINED_GLASS_PANE);
+    }
+
+    protected void uiButton(int slot, Material material, String name, Runnable action, String... lore) {
+        inventory.setItem(slot, Items.named(material, name, lore));
+        if (action != null) {
+            registerClick(slot, action);
+        }
+    }
+
     protected void backButton(int slot, Runnable action) {
-        inventory.setItem(slot, Items.named(Material.ARROW, "&c&lBack", "&7Return to previous menu"));
+        inventory.setItem(slot, Items.named(Material.ARROW, "&c&lНазад", "&7Вернуться на предыдущий экран"));
         registerClick(slot, action);
     }
 

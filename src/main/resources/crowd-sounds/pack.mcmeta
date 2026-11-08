@@ -1,6 +1,6 @@
 {
   "pack": {
-    "pack_format": 22,
-    "description": "AdvancedSoccer — stadium crowd atmosphere"
+    "pack_format": 32,
+    "description": "AdvancedSoccer — интерфейс и атмосфера стадиона"
   }
 }

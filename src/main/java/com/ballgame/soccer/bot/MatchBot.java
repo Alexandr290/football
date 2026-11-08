@@ -217,9 +217,9 @@ public final class MatchBot implements KickActor {
         } else {
             // Keepers re-read the ball every tick; outfield bots decide almost every tick.
             thinkCooldown = switch (game.getBotDifficulty(getTeam())) {
-                case EASY -> role == BotRole.GOALKEEPER ? 1 : 4;
-                case MEDIUM -> role == BotRole.GOALKEEPER ? 0 : 1;
-                case HARD -> 0;
+                case EASY -> role == BotRole.GOALKEEPER ? 1 : 3;
+                case MEDIUM -> role == BotRole.GOALKEEPER ? 1 : 2;
+                case HARD -> role == BotRole.GOALKEEPER ? 0 : 1;
             };
             BotAi.think(game, this, matchTick);
         }

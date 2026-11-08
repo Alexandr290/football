@@ -1,0 +1,21 @@
+{
+  "providers": [
+    {
+      "type": "reference",
+      "id": "minecraft:include/default"
+    },
+    {
+      "type": "bitmap",
+      "file": "ballgame:font/fifa_dashboard.png",
+      "ascent": 14,
+      "height": 180,
+      "chars": ["\ue000"]
+    },
+    {
+      "type": "space",
+      "advances": {
+        "\ue010": -176
+      }
+    }
+  ]
+}

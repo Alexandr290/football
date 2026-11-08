@@ -48,7 +48,8 @@ public final class GamesMenu {
                     msg.raw("games-gui-list-header"),
                     msg.raw("games-gui-list-header-lore")));
 
-            List<MatchRecord> all = plugin.matchHistory().listRecent();
+            List<MatchRecord> all =
+                    plugin.matchHistory().listRecentForParticipant(viewer.getUniqueId(), 20);
             int from = page * PAGE_SIZE;
             int to = Math.min(from + PAGE_SIZE, all.size());
 
@@ -90,6 +91,8 @@ public final class GamesMenu {
                 inventory.setItem(45, Items.named(Material.ARROW,
                         msg.raw("games-gui-prev-page"), "&7«"));
                 registerClick(45, () -> new ListMenu(plugin, viewer, page - 1).open());
+            } else {
+                backButton(45, () -> MainHubMenu.open(plugin, viewer));
             }
             if (to < all.size()) {
                 inventory.setItem(53, Items.named(Material.ARROW,
@@ -147,11 +150,12 @@ public final class GamesMenu {
                     .comparing((ParticipantRecord p) -> p.getTeam())
                     .thenComparing(ParticipantRecord::getName, String.CASE_INSENSITIVE_ORDER));
 
-            int slot = 27;
-            for (ParticipantRecord p : participants) {
-                if (slot > 44) {
-                    break;
+            int placed = 0;
+            for (int slot = 27; slot <= 53 && placed < participants.size(); slot++) {
+                if (slot == 49) {
+                    continue;
                 }
+                ParticipantRecord p = participants.get(placed++);
                 Material mat = p.isBot() ? Material.IRON_HELMET : Material.PLAYER_HEAD;
                 String tag = p.isBot() ? msg.raw("games-gui-bot-tag") : "";
                 String teamColor = p.getTeam().equals("RED") ? "&c" : "&9";
@@ -159,17 +163,18 @@ public final class GamesMenu {
                         teamColor + p.getName() + tag,
                         msg.format("games-gui-player-summary",
                                 "goals", String.valueOf(p.getGoals()),
-                                "shots", String.valueOf(p.getShots()),
+                                "assists", String.valueOf(p.getAssists()),
                                 "rating", String.format(Locale.US, "%.1f", p.getRating())),
                         "",
                         msg.raw("games-gui-player-click"));
                 final String pid = p.getUuid().toString();
                 inventory.setItem(slot, item);
                 registerClick(slot, () -> new PlayerMenu(plugin, viewer, matchId, pid).open());
-                slot++;
             }
 
             backButton(49, () -> GamesMenu.open(plugin, viewer));
+            inventory.setItem(49, Items.named(Material.ARROW,
+                    msg.raw("games-gui-back"), msg.raw("games-gui-back-lore")));
         }
 
         @Override
@@ -188,7 +193,7 @@ public final class GamesMenu {
         private final String participantId;
 
         PlayerMenu(SoccerPlugin plugin, Player viewer, String matchId, String participantId) {
-            super(plugin, viewer, plugin.messages().raw("games-gui-player-title"), 4);
+            super(plugin, viewer, plugin.messages().raw("games-gui-player-title"), 6);
             this.matchId = matchId;
             this.participantId = participantId;
         }
@@ -200,14 +205,16 @@ public final class GamesMenu {
             MatchRecord match = plugin.matchHistory().get(matchId);
             ParticipantRecord p = match != null ? match.findParticipant(participantId) : null;
             if (p == null) {
-                inventory.setItem(13, Items.named(Material.BARRIER, "&c" + msg.raw("games-gui-not-found")));
-                backButton(31, () -> {
+                inventory.setItem(22, Items.named(Material.BARRIER, "&c" + msg.raw("games-gui-not-found")));
+                backButton(49, () -> {
                     if (match != null) {
                         new DetailMenu(plugin, viewer, matchId).open();
                     } else {
                         GamesMenu.open(plugin, viewer);
                     }
                 });
+                inventory.setItem(49, Items.named(Material.ARROW,
+                        msg.raw("games-gui-back"), msg.raw("games-gui-back-lore")));
                 return;
             }
 
@@ -222,27 +229,69 @@ public final class GamesMenu {
                                     ? msg.raw("games-gui-team-red-short")
                                     : msg.raw("games-gui-team-blue-short"))));
 
-            inventory.setItem(11, statItem(msg, "games-gui-stat-possession",
-                    p.getPossessionPct() + "%"));
-            inventory.setItem(12, statItem(msg, "games-gui-stat-shots",
-                    String.valueOf(p.getShots())));
-            inventory.setItem(13, statItem(msg, "games-gui-stat-goals",
-                    String.valueOf(p.getGoals())));
-            inventory.setItem(14, statItem(msg, "games-gui-stat-fouls",
-                    String.valueOf(p.getFouls())));
-            inventory.setItem(15, statItem(msg, "games-gui-stat-rating",
-                    String.format(Locale.US, "%.1f", p.getRating()) + " / 10"));
+            String ratingText = String.format(Locale.US, "%.1f", p.getRating())
+                    + " — " + msg.raw(gradeKey(p.getRating()));
+            put(10, Material.NETHER_STAR, msg, "games-gui-stat-rating", ratingText);
+            put(11, Material.GOLD_NUGGET, msg, "games-gui-stat-goals", String.valueOf(p.getGoals()));
+            put(12, Material.SLIME_BALL, msg, "games-gui-stat-assists", String.valueOf(p.getAssists()));
+            put(13, Material.ARROW, msg, "games-gui-stat-shots", String.valueOf(p.getShots()));
+            put(14, Material.SPECTRAL_ARROW, msg, "games-gui-stat-shots-on-target",
+                    String.valueOf(p.getShotsOnTarget()));
+            put(15, Material.FLINT, msg, "games-gui-stat-shots-off-target",
+                    String.valueOf(p.getShotsOffTarget()));
+            put(16, Material.BLAZE_POWDER, msg, "games-gui-stat-chances-created",
+                    String.valueOf(p.getChancesCreated()));
 
-            inventory.setItem(20, statItem(msg, "games-gui-stat-pass-accuracy",
-                    p.getPassAccuracyPct() + "%"));
-            inventory.setItem(21, statItem(msg, "games-gui-stat-passes",
-                    String.valueOf(p.getPasses())));
-            inventory.setItem(22, statItem(msg, "games-gui-stat-passes-received",
-                    String.valueOf(p.getPassesReceived())));
-            inventory.setItem(23, statItem(msg, "games-gui-stat-assists",
-                    String.valueOf(p.getAssists())));
+            put(19, Material.COAL, msg, "games-gui-stat-chances-missed",
+                    String.valueOf(p.getChancesMissed()));
+            put(20, Material.CLOCK, msg, "games-gui-stat-possession", p.getPossessionPct() + "%");
+            put(21, Material.LEATHER_BOOTS, msg, "games-gui-stat-distance",
+                    String.format(Locale.US, "%.1f м", p.getDistance()));
+            put(22, Material.FEATHER, msg, "games-gui-stat-max-speed",
+                    String.format(Locale.US, "%.1f м/с", p.getMaxSpeed()));
+            put(23, Material.PAPER, msg, "games-gui-stat-passes", String.valueOf(p.getPasses()));
+            put(24, Material.EMERALD, msg, "games-gui-stat-passes-completed",
+                    String.valueOf(p.getPassesCompleted()));
+            put(25, Material.COMPASS, msg, "games-gui-stat-pass-accuracy",
+                    p.getPassAccuracyPct() + "%");
 
-            backButton(31, () -> new DetailMenu(plugin, viewer, matchId).open());
+            put(28, Material.BOOK, msg, "games-gui-stat-passes-received",
+                    String.valueOf(p.getPassesReceived()));
+            put(29, Material.GLOWSTONE_DUST, msg, "games-gui-stat-key-passes",
+                    String.valueOf(p.getKeyPasses()));
+            put(30, Material.FISHING_ROD, msg, "games-gui-stat-crosses",
+                    String.valueOf(p.getCrosses()));
+            put(31, Material.IRON_SWORD, msg, "games-gui-stat-tackles",
+                    String.valueOf(p.getTackles()));
+            put(32, Material.DIAMOND_SWORD, msg, "games-gui-stat-tackles-won",
+                    String.valueOf(p.getTacklesWon()));
+            put(33, Material.SHIELD, msg, "games-gui-stat-interceptions",
+                    String.valueOf(p.getInterceptions()));
+            put(34, Material.RABBIT_FOOT, msg, "games-gui-stat-dribbles",
+                    String.valueOf(p.getDribbles()));
+
+            put(37, Material.IRON_CHESTPLATE, msg, "games-gui-stat-duels",
+                    String.valueOf(p.getDuelsWon()));
+            put(38, Material.WATER_BUCKET, msg, "games-gui-stat-saves",
+                    String.valueOf(p.getSaves()));
+            put(39, Material.PISTON, msg, "games-gui-stat-clearances",
+                    String.valueOf(p.getClearances()));
+            put(40, Material.SNOWBALL, msg, "games-gui-stat-touches",
+                    String.valueOf(p.getTouches()));
+            put(41, Material.ROTTEN_FLESH, msg, "games-gui-stat-fouls",
+                    String.valueOf(p.getFouls()));
+            put(42, Material.YELLOW_DYE, msg, "games-gui-stat-yellows",
+                    String.valueOf(p.getYellowCards()));
+            put(43, Material.RED_DYE, msg, "games-gui-stat-own-goals",
+                    String.valueOf(p.getOwnGoals()));
+
+            backButton(49, () -> new DetailMenu(plugin, viewer, matchId).open());
+            inventory.setItem(49, Items.named(Material.ARROW,
+                    msg.raw("games-gui-back"), msg.raw("games-gui-back-lore")));
+        }
+
+        private void put(int slot, Material material, Messages msg, String key, String value) {
+            inventory.setItem(slot, Items.named(material, msg.raw(key), "&f" + value));
         }
 
         @Override
@@ -255,10 +304,26 @@ public final class GamesMenu {
         }
     }
 
-    private static ItemStack statItem(Messages msg, String key, String value) {
-        return Items.named(Material.PAPER,
-                msg.raw(key),
-                "&f" + value);
+    private static String gradeKey(double rating) {
+        if (rating >= 9.0) {
+            return "games-gui-grade-9";
+        }
+        if (rating >= 8.0) {
+            return "games-gui-grade-8";
+        }
+        if (rating >= 7.0) {
+            return "games-gui-grade-7";
+        }
+        if (rating >= 6.2) {
+            return "games-gui-grade-6";
+        }
+        if (rating >= 5.4) {
+            return "games-gui-grade-5";
+        }
+        if (rating >= 4.5) {
+            return "games-gui-grade-4";
+        }
+        return "games-gui-grade-low";
     }
 
     private static String[] teamStatsLore(Messages msg, MatchRecord match, String team) {
